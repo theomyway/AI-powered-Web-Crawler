@@ -1,0 +1,101 @@
+# Sample Government Portal Configuration
+# This file demonstrates the structure for configuring a new crawl source.
+# To add a new state/source, copy this file and modify the values.
+# Then import it into the database via the /api/v1/sources endpoint.
+
+# Source Identity
+name: "Sample State eProcurement Portal"
+source_type: "government_portal"
+state_code: "XX"  # Two-letter state code
+county: null  # Optional: specific county
+region: null  # Optional: geographic region
+
+# URLs
+base_url: "https://procurement.example.gov"
+search_url: "https://procurement.example.gov/opportunities/search"
+
+# Scheduling
+schedule_cron: "0 6 * * *"  # Daily at 6 AM
+crawl_delay: 2.0  # Seconds between requests
+priority: 5  # 1=highest, 10=lowest
+is_enabled: true
+
+# Crawler Configuration
+config:
+  # CSS/XPath Selectors
+  selectors:
+    # List page
+    opportunity_list: ".opportunity-card"
+    next_page: ".pagination .next a"
+    
+    # Individual opportunity fields
+    title: ".opportunity-title h2"
+    description: ".opportunity-description"
+    deadline: ".deadline-date"
+    published_date: ".posted-date"
+    department: ".issuing-agency"
+    opportunity_id: ".solicitation-number"
+    estimated_value: ".estimated-value"
+    contact_info: ".contact-information"
+    documents: ".attachments a[href$='.pdf'], .attachments a[href$='.doc']"
+    
+    # Custom selectors (source-specific)
+    custom:
+      nigp_code: ".commodity-code"
+      contract_type: ".contract-type"
+
+  # Pagination settings
+  pagination:
+    type: "link"  # link, ajax, scroll, api
+    max_pages: 20
+    page_param: "page"
+    items_per_page: 25
+    wait_after_page: 1.5
+
+  # Keywords to identify relevant opportunities
+  keywords:
+    - "artificial intelligence"
+    - "AI"
+    - "machine learning"
+    - "Microsoft Dynamics"
+    - "Dynamics 365"
+    - "CRM"
+    - "ERP"
+    - "enterprise resource planning"
+    - "IoT"
+    - "internet of things"
+    - "IT staff"
+    - "staff augmentation"
+    - "consulting services"
+    - "cloud services"
+    - "Azure"
+    - "data analytics"
+
+  # Keywords to exclude
+  exclude_keywords:
+    - "construction"
+    - "janitorial"
+    - "landscaping"
+    - "food service"
+
+  # JavaScript rendering
+  requires_javascript: false
+  wait_for_selector: null
+  wait_timeout: 30
+
+  # Date parsing
+  date_format: "%m/%d/%Y"
+  timezone: "America/New_York"
+
+  # Custom headers (if needed)
+  headers: {}
+
+  # Cookies (if needed)
+  cookies: {}
+
+# Notes
+notes: |
+  Sample configuration file for reference.
+  Modify selectors based on actual portal HTML structure.
+  Test selectors in browser DevTools before deploying.
+
