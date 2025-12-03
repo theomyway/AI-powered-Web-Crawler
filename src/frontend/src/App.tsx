@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/layout';
-import { Dashboard } from './pages';
+import { Dashboard, RfpScanner } from './pages';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ThemeProvider } from './contexts/ThemeContext';
 
@@ -12,7 +12,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Layout />}>
               <Route index element={<Dashboard />} />
-              <Route path="scanner" element={<ComingSoon title="RFP Scanner" />} />
+              <Route path="scanner" element={<RfpScanner />} />
               <Route path="generator" element={<ComingSoon title="RFP Generator" />} />
               <Route path="analytics" element={<ComingSoon title="Analytics" />} />
             </Route>

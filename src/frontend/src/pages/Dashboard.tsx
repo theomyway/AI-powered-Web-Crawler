@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Info, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Info, RefreshCw, Search, ArrowRight } from 'lucide-react';
 import { StatsCards, OpportunitiesTable, CrawlerStatus } from '../components/dashboard';
 import { dashboardApi, opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
 import type { DashboardStats, Opportunity, CrawlSession, CrawlSource } from '../types';
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [latestSession, setLatestSession] = useState<CrawlSession | null>(null);
@@ -102,6 +104,27 @@ export function Dashboard() {
 
       {/* Stats Cards */}
       <StatsCards stats={stats} loading={loading} />
+
+      {/* Scanner Quick Access Card */}
+      <button
+        onClick={() => navigate('/scanner')}
+        className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl p-6 text-left transition-all shadow-sm hover:shadow-md group"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-white/10 rounded-lg">
+              <Search className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">RFP Opportunity Scanner</h3>
+              <p className="text-sm text-blue-100 mt-0.5">
+                Scan websites for AI, Dynamics, IoT, ERP, and Staff Augmentation opportunities
+              </p>
+            </div>
+          </div>
+          <ArrowRight className="w-5 h-5 text-white opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+        </div>
+      </button>
 
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
