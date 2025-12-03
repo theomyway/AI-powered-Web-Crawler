@@ -125,23 +125,29 @@ async def list_opportunities(
     
     result = await db.execute(query)
     opportunities = result.scalars().all()
-    
-    # Build response with document count
+
+    # Build response with document count and primary category
     items = []
     for opp in opportunities:
+        # Get primary category (first from categories array)
+        primary_category = opp.categories[0] if opp.categories else None
+
         item = OpportunityListItem(
             id=opp.id,
             title=opp.title,
             source_id=opp.source_id,
+            source_url=opp.source_url,
             state_code=opp.state_code,
             county=opp.county,
-            categories=opp.categories,
+            category=primary_category,
+            categories=opp.categories or [],
             status=opp.status,
             submission_deadline=opp.submission_deadline,
             estimated_value=opp.estimated_value,
             requires_prequalification=opp.requires_prequalification,
             is_discretionary=opp.is_discretionary,
             relevance_score=opp.relevance_score,
+            published_date=opp.published_date,
             document_count=0,  # Will be populated via relationship count
             created_at=opp.created_at,
         )

@@ -123,14 +123,16 @@ class OpportunityResponse(OpportunityBase):
 
 class OpportunityListItem(BaseModel):
     """Lightweight schema for opportunity list view."""
-    
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     title: str
     source_id: UUID
+    source_url: str
     state_code: str
     county: str | None
+    category: str | None = None  # Primary category (first from categories array)
     categories: list[str]
     status: OpportunityStatus
     submission_deadline: datetime | None
@@ -138,6 +140,7 @@ class OpportunityListItem(BaseModel):
     requires_prequalification: bool
     is_discretionary: bool
     relevance_score: Decimal | None
+    published_date: datetime | None = None
     document_count: int = 0
     created_at: datetime
 
