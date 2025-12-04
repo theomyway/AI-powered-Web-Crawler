@@ -21,9 +21,12 @@ const STATUS_OPTIONS = [
   { value: 'new', label: 'New' },
   { value: 'reviewing', label: 'Reviewing' },
   { value: 'qualified', label: 'Qualified' },
+  { value: 'not_relevant', label: 'Not Relevant' },
   { value: 'applied', label: 'Applied' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'won', label: 'Won' },
+  { value: 'lost', label: 'Lost' },
   { value: 'expired', label: 'Expired' },
+  { value: 'archived', label: 'Archived' },
 ];
 
 // Helper functions (same as OpportunitiesTable)
@@ -98,10 +101,20 @@ function getUrlHostname(url: string | null | undefined): string {
   }
 }
 
+const SCANNER_URLS_KEY = 'rfp_scanner_urls';
+
 export function RfpScanner() {
   // Scanner configuration state
   const [targetUrl, setTargetUrl] = useState('');
-  const [urlList, setUrlList] = useState<string[]>([]);
+  const [urlList, setUrlList] = useState<string[]>(() => {
+    // Load URLs from localStorage on initial render
+    try {
+      const saved = localStorage.getItem(SCANNER_URLS_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
     CATEGORIES.map(c => c.value) // All categories selected by default
   );
@@ -121,6 +134,15 @@ export function RfpScanner() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  // Save URLs to localStorage whenever urlList changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCANNER_URLS_KEY, JSON.stringify(urlList));
+    } catch (error) {
+      console.error('Failed to save URLs to localStorage:', error);
+    }
+  }, [urlList]);
 
   // Load sources on mount
   useEffect(() => {
@@ -464,12 +486,12 @@ export function RfpScanner() {
             <table className="w-full">
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Title</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Category</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Website URL</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Website URL</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">

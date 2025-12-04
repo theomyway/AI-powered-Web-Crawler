@@ -6,6 +6,10 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Serialize array params correctly for FastAPI (e.g., status=new&status=reviewing)
+  paramsSerializer: {
+    indexes: null, // This makes axios serialize arrays as param=value1&param=value2
+  },
 });
 
 export const dashboardApi = {

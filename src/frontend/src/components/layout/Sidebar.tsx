@@ -4,7 +4,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, enabled: true },
-  { name: 'RFP Scanner', href: '/scanner', icon: Scan, enabled: false },
+  { name: 'RFP Scanner', href: '/scanner', icon: Scan, enabled: true },
   { name: 'RFP Generator', href: '/generator', icon: FileText, enabled: false },
   { name: 'Analytics', href: '/analytics', icon: BarChart3, enabled: false },
 ];
@@ -27,7 +27,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        <p className="px-3 text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+        <p className="px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
           Navigation
         </p>
         {navigation.map((item) => (
@@ -39,8 +39,8 @@ export function Sidebar() {
                 !item.enabled
                   ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
                   : isActive
-                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
               }`
             }
             onClick={(e) => !item.enabled && e.preventDefault()}

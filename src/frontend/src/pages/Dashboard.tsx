@@ -117,7 +117,7 @@ export function Dashboard() {
             </div>
             <div>
               <h3 className="text-lg font-semibold text-white">RFP Opportunity Scanner</h3>
-              <p className="text-sm text-blue-100 mt-0.5">
+              <p className="text-sm text-white/90 mt-0.5">
                 Scan websites for AI, Dynamics, IoT, ERP, and Staff Augmentation opportunities
               </p>
             </div>
