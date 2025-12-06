@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Search, Play, Plus, ExternalLink, ChevronDown, Wand2, Globe, Settings, X } from 'lucide-react';
+import { Search, Play, Plus, ExternalLink, ChevronDown, Wand2, Globe, Settings, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow, parseISO, isPast } from 'date-fns';
 import { opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
 import type { Opportunity, CrawlSource } from '../types';
+import type { UrlCrawlResponse, ExtractedOpportunity } from '../services/api';
 
 // Category options matching the backend
 const CATEGORIES = [
@@ -119,8 +120,14 @@ export function RfpScanner() {
     CATEGORIES.map(c => c.value) // All categories selected by default
   );
   const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{
+    stage: 'idle' | 'fetching' | 'analyzing' | 'saving' | 'complete' | 'error';
+    message: string;
+    details?: string;
+  }>({ stage: 'idle', message: '' });
   const [scanMessage, setScanMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const [sources, setSources] = useState<CrawlSource[]>([]);
+  const [scanResults, setScanResults] = useState<UrlCrawlResponse | null>(null);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -214,29 +221,76 @@ export function RfpScanner() {
 
   // Handle scan start
   const handleStartScan = async () => {
-    if (urlList.length === 0 && sources.length === 0) {
+    if (urlList.length === 0) {
       setScanMessage({ type: 'error', text: 'Please add at least one URL to scan.' });
       return;
     }
 
     setIsScanning(true);
-    setScanMessage({ type: 'info', text: 'Starting scan...' });
+    setScanResults(null);
+    setScanMessage(null);
+    setScanProgress({
+      stage: 'fetching',
+      message: 'Fetching page content...',
+      details: `Scanning ${urlList.length} URL(s)`
+    });
 
     try {
-      // If no URL entered, use first source
-      if (sources.length > 0) {
-        await crawlApi.triggerCrawl(sources[0].id);
+      // Update progress to analyzing
+      setTimeout(() => {
+        if (isScanning) {
+          setScanProgress({
+            stage: 'analyzing',
+            message: 'Analyzing with AI...',
+            details: 'Extracting RFP opportunities using GPT-4o'
+          });
+        }
+      }, 3000);
+
+      // Call the scan-urls API
+      const response = await crawlApi.scanUrls({
+        urls: urlList,
+        categories: selectedCategories,
+      });
+
+      setScanResults(response);
+
+      if (response.success) {
+        setScanProgress({
+          stage: 'complete',
+          message: 'Scan complete!',
+          details: `Found ${response.total_relevant} relevant opportunities`
+        });
         setScanMessage({
           type: 'success',
-          text: `Scan initiated for ${sources[0].name}. Results will appear shortly.`,
+          text: `Found ${response.total_relevant} relevant opportunities. ${response.saved_to_db} saved to database.`,
         });
+
+        // Refresh opportunities list
+        setTimeout(() => fetchOpportunities(), 1000);
       } else {
-        setScanMessage({ type: 'info', text: 'Custom URL scanning coming soon.' });
+        setScanProgress({
+          stage: 'error',
+          message: 'Scan failed',
+          details: response.error || 'Unknown error'
+        });
+        setScanMessage({
+          type: 'error',
+          text: response.error || 'Scan failed. Please try again.'
+        });
       }
-      // Refresh opportunities after short delay
-      setTimeout(() => fetchOpportunities(), 2000);
-    } catch (error) {
-      setScanMessage({ type: 'error', text: 'Failed to start scan. Please try again.' });
+    } catch (error: any) {
+      console.error('Scan error:', error);
+      const errorMessage = error.response?.data?.error
+        || error.message
+        || 'Failed to start scan. Please check your connection and try again.';
+
+      setScanProgress({
+        stage: 'error',
+        message: 'Scan failed',
+        details: errorMessage
+      });
+      setScanMessage({ type: 'error', text: errorMessage });
     } finally {
       setIsScanning(false);
     }
@@ -257,8 +311,23 @@ export function RfpScanner() {
         </p>
       </div>
 
+      {/* Scan Progress */}
+      {isScanning && scanProgress.stage !== 'idle' && (
+        <div className="p-4 rounded-lg border bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin" />
+            <div>
+              <p className="text-sm font-medium text-blue-700 dark:text-blue-300">{scanProgress.message}</p>
+              {scanProgress.details && (
+                <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">{scanProgress.details}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scan Message */}
-      {scanMessage && (
+      {!isScanning && scanMessage && (
         <div
           className={`p-4 rounded-lg border ${
             scanMessage.type === 'error'
@@ -268,7 +337,11 @@ export function RfpScanner() {
               : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
           }`}
         >
-          <p className="text-sm">{scanMessage.text}</p>
+          <div className="flex items-center gap-2">
+            {scanMessage.type === 'success' && <CheckCircle className="w-5 h-5" />}
+            {scanMessage.type === 'error' && <AlertCircle className="w-5 h-5" />}
+            <p className="text-sm">{scanMessage.text}</p>
+          </div>
         </div>
       )}
 

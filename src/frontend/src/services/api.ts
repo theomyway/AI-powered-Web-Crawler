@@ -71,6 +71,45 @@ export const opportunitiesApi = {
   },
 };
 
+// Types for URL-based crawl
+export interface UrlCrawlRequest {
+  urls: string[];
+  categories?: string[];
+}
+
+export interface ExtractedOpportunity {
+  document_id: string;
+  event_name: string;
+  document_url: string | null;
+  event_start_date: string | null;
+  response_due_date: string | null;
+  last_updated: string | null;
+  is_relevant: boolean;
+  predicted_category: string;
+  classification_confidence: number;
+  classification_reason: string;
+}
+
+export interface UrlCrawlResult {
+  url: string;
+  success: boolean;
+  total_found: number;
+  relevant_count: number;
+  opportunities: ExtractedOpportunity[];
+  error: string | null;
+  crawl_duration: number | null;
+}
+
+export interface UrlCrawlResponse {
+  success: boolean;
+  crawl_session_id: string;
+  results: UrlCrawlResult[];
+  total_relevant: number;
+  saved_to_db: number;
+  message: string | null;
+  error: string | null;
+}
+
 export const crawlApi = {
   getSessions: async (page = 1, pageSize = 10): Promise<PaginatedResponse<CrawlSession>> => {
     const response = await api.get<PaginatedResponse<CrawlSession>>('/crawl/sessions', {
@@ -81,6 +120,19 @@ export const crawlApi = {
 
   triggerCrawl: async (sourceId: string): Promise<CrawlSession> => {
     const response = await api.post<CrawlSession>(`/crawl/trigger/${sourceId}`);
+    return response.data;
+  },
+
+  /**
+   * Scan URLs for RFP opportunities using AI-powered extraction.
+   *
+   * @param request - URLs to scan and optional category filters
+   * @returns Extracted opportunities from the scanned pages
+   */
+  scanUrls: async (request: UrlCrawlRequest): Promise<UrlCrawlResponse> => {
+    const response = await api.post<UrlCrawlResponse>('/crawl/scan-urls', request, {
+      timeout: 120000, // 2 minute timeout for crawling
+    });
     return response.data;
   },
 };

@@ -66,15 +66,44 @@ class Settings(BaseSettings):
     # Azure OpenAI
     azure_openai_endpoint: str | None = Field(
         default=None,
-        description="Azure OpenAI endpoint URL"
+        description="Azure OpenAI endpoint URL (e.g., https://your-resource.openai.azure.com/)"
     )
     azure_openai_api_key: str | None = Field(
         default=None,
         description="Azure OpenAI API key"
     )
-    azure_openai_deployment: str = "gpt-4"
-    azure_openai_api_version: str = "2024-02-15-preview"
-    
+    azure_openai_deployment: str = Field(
+        default="gpt-4o",
+        description="Azure OpenAI deployment name for GPT-4o"
+    )
+    azure_openai_api_version: str = "2024-08-01-preview"
+
+    # Azure Document Intelligence (Form Recognizer)
+    azure_doc_intelligence_endpoint: str | None = Field(
+        default=None,
+        description="Azure Document Intelligence endpoint URL"
+    )
+    azure_doc_intelligence_key: str | None = Field(
+        default=None,
+        description="Azure Document Intelligence API key"
+    )
+
+    # Azure Functions
+    azure_function_url: str | None = Field(
+        default=None,
+        description="Azure Function App URL (e.g., https://your-app.azurewebsites.net)"
+    )
+    azure_function_key: str | None = Field(
+        default=None,
+        description="Azure Function host key for authentication"
+    )
+
+    # Crawler Proxy (for geo-restricted sites)
+    crawler_proxy_url: str | None = Field(
+        default=None,
+        description="HTTP/HTTPS proxy URL for crawling (e.g., http://proxy:8080)"
+    )
+
     # Redis Cache
     redis_url: RedisDsn | None = Field(
         default=None,

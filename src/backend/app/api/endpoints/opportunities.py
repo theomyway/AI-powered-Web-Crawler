@@ -214,8 +214,33 @@ async def update_opportunity(
     
     await db.flush()
     await db.refresh(opportunity)
-    
+
     logger.info("Opportunity updated", opportunity_id=str(opportunity_id), fields=list(update_data.keys()))
-    
+
     return OpportunityResponse.model_validate(opportunity)
+
+
+@router.delete("", status_code=status.HTTP_200_OK)
+async def delete_all_opportunities(db: DB) -> dict:
+    """
+    Delete all opportunities from the database.
+
+    WARNING: This is a destructive operation intended for testing/development.
+    Use with caution.
+
+    Returns:
+        dict: Count of deleted records
+    """
+    # Count before delete
+    count_query = select(func.count()).select_from(Opportunity)
+    result = await db.execute(count_query)
+    count = result.scalar() or 0
+
+    # Delete all opportunities
+    await db.execute(Opportunity.__table__.delete())
+    await db.commit()
+
+    logger.warning("All opportunities deleted", deleted_count=count)
+
+    return {"deleted_count": count, "message": f"Successfully deleted {count} opportunities"}
 

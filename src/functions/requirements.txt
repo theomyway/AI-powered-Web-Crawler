@@ -1,0 +1,28 @@
+# Azure Functions SDK
+azure-functions>=1.17.0
+
+# Azure Services
+azure-identity>=1.15.0
+azure-ai-formrecognizer>=3.3.0
+
+# OpenAI
+openai>=1.12.0
+
+# Web Crawling
+playwright>=1.41.0
+httpx>=0.26.0
+beautifulsoup4>=4.12.3
+lxml>=5.1.0
+
+# Database
+sqlalchemy>=2.0.25
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+
+# Utilities
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+tenacity>=8.2.3
+structlog>=24.1.0
+aiofiles>=23.2.1
+
