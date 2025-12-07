@@ -21,8 +21,9 @@ class SelectorConfig(BaseModel):
     Supports both CSS selectors and XPath expressions.
     """
     
-    # List page selectors
-    opportunity_list: str = Field(
+    # List page selectors (optional - AI handles extraction from page content)
+    opportunity_list: str | None = Field(
+        default=None,
         description="Selector for opportunity items on list page"
     )
     next_page: str | None = Field(
@@ -30,8 +31,8 @@ class SelectorConfig(BaseModel):
         description="Selector for next page button/link"
     )
     
-    # Detail extraction
-    title: str = Field(description="Selector for opportunity title")
+    # Detail extraction (all optional - extracted via AI classification)
+    title: str | None = Field(default=None, description="Selector for opportunity title")
     description: str | None = Field(default=None, description="Selector for description")
     deadline: str | None = Field(default=None, description="Selector for submission deadline")
     published_date: str | None = Field(default=None, description="Selector for published date")
