@@ -19,6 +19,7 @@ This consolidates the previous separate functions into one async flow.
 import json
 import logging
 import time
+import httpx
 import azure.functions as func
 from dataclasses import asdict
 from datetime import datetime
@@ -44,6 +45,46 @@ def log_step(step_num: int, step_name: str, status: str,
         metrics_str = ", ".join(f"{k}={v}" for k, v in metrics.items())
         log_msg += f" | {metrics_str}"
     logger.info(f"{timestamp} - {log_msg}")
+
+
+async def callback_processing_status(
+    backend_url: str,
+    source_id: str,
+    status: str,
+    error_message: str = None,
+    opportunities_found: int = None
+):
+    """
+    Callback to the backend to update processing status.
+
+    Args:
+        backend_url: Base URL of the backend API
+        source_id: UUID of the crawl source
+        status: 'success' or 'failed'
+        error_message: Error message if status is 'failed'
+        opportunities_found: Number of opportunities found
+    """
+    if not backend_url or not source_id:
+        logger.warning("Cannot callback: missing backend_url or source_id")
+        return
+
+    try:
+        url = f"{backend_url}/api/v1/sources/{source_id}/status"
+        payload = {
+            "processing_status": status,
+            "processing_error_message": error_message,
+            "opportunities_found": opportunities_found
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.patch(url, json=payload)
+
+            if response.status_code == 200:
+                logger.info(f"Successfully updated processing status for source {source_id} to {status}")
+            else:
+                logger.warning(f"Failed to update processing status: {response.status_code} - {response.text}")
+    except Exception as e:
+        logger.error(f"Error calling back to backend: {e}")
 
 
 async def process_single_url(
@@ -286,12 +327,18 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("RFP CRAWLER FUNCTION TRIGGERED")
     logger.info("=" * 80)
 
+    # Track source_ids and backend_url for callbacks
+    source_ids = []
+    backend_url = None
+
     try:
         # Parse request
         req_body = req.get_json()
         urls = req_body.get("urls", [])
         crawl_session_id = req_body.get("crawl_session_id", str(datetime.utcnow().timestamp()))
         state_code = req_body.get("state_code", "TN")
+        source_ids = req_body.get("source_ids", [])  # Source IDs for callback
+        backend_url = req_body.get("backend_url")  # Backend URL for callback
 
         if not urls:
             return func.HttpResponse(
@@ -307,7 +354,9 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             "urls_count": len(urls),
             "session_id": crawl_session_id,
             "state_code": state_code,
-            "stage2_enabled": enable_stage2
+            "stage2_enabled": enable_stage2,
+            "has_source_ids": len([s for s in source_ids if s]) > 0,
+            "has_backend_url": backend_url is not None
         })
 
         # Initialize services
@@ -360,6 +409,19 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             "not_relevant": total_found - total_relevant
         })
 
+        # === CALLBACK TO BACKEND: Update processing status ===
+        if backend_url and source_ids:
+            for source_id in source_ids:
+                if source_id:  # Skip None entries (ad-hoc URLs)
+                    status = "failed" if db_error else "success"
+                    await callback_processing_status(
+                        backend_url=backend_url,
+                        source_id=source_id,
+                        status=status,
+                        error_message=db_error,
+                        opportunities_found=saved_count
+                    )
+
         # Return summary response (without full opportunity data to reduce payload)
         return func.HttpResponse(
             json.dumps({
@@ -384,6 +446,16 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
 
     except ValueError as e:
         logger.error(f"Invalid request: {e}")
+        # Callback with failure status
+        if backend_url and source_ids:
+            for source_id in source_ids:
+                if source_id:
+                    await callback_processing_status(
+                        backend_url=backend_url,
+                        source_id=source_id,
+                        status="failed",
+                        error_message=f"Invalid request: {str(e)}"
+                    )
         return func.HttpResponse(
             json.dumps({"success": False, "error": f"Invalid request: {str(e)}"}),
             status_code=400,
@@ -391,6 +463,16 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         )
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
+        # Callback with failure status
+        if backend_url and source_ids:
+            for source_id in source_ids:
+                if source_id:
+                    await callback_processing_status(
+                        backend_url=backend_url,
+                        source_id=source_id,
+                        status="failed",
+                        error_message=f"Internal error: {str(e)}"
+                    )
         return func.HttpResponse(
             json.dumps({"success": False, "error": f"Internal error: {str(e)}"}),
             status_code=500,

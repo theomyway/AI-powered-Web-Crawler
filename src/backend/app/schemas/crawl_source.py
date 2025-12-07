@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-from app.models.crawl_source import SourceStatus, SourceType
+from app.models.crawl_source import ProcessingStatus, SourceStatus, SourceType
 
 
 class SelectorConfig(BaseModel):
@@ -167,9 +167,9 @@ class CrawlSourceUpdate(BaseModel):
 
 class CrawlSourceResponse(CrawlSourceBase):
     """Schema for CrawlSource API response."""
-    
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     status: SourceStatus
     requires_auth: bool
@@ -179,4 +179,20 @@ class CrawlSourceResponse(CrawlSourceBase):
     total_opportunities_found: int
     created_at: datetime
     updated_at: datetime
+
+    # Real-time processing status tracking
+    processing_status: ProcessingStatus | None = None
+    last_crawl_started_at: datetime | None = None
+    last_crawl_completed_at: datetime | None = None
+    processing_error_message: str | None = None
+
+
+class ProcessingStatusUpdate(BaseModel):
+    """Schema for updating processing status from Azure Function callback."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    processing_status: ProcessingStatus
+    processing_error_message: str | None = None
+    opportunities_found: int | None = None
 

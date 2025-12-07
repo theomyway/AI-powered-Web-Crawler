@@ -41,6 +41,15 @@ class SourceStatus(str, enum.Enum):
     MAINTENANCE = "maintenance"
 
 
+class ProcessingStatus(str, enum.Enum):
+    """Processing status for real-time crawl tracking."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
 class CrawlSource(Base, TimestampMixin):
     """
     Configuration for a crawlable data source.
@@ -134,7 +143,23 @@ class CrawlSource(Base, TimestampMixin):
     last_success_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_opportunities_found: Mapped[int] = mapped_column(Integer, default=0)
-    
+
+    # Real-time processing status tracking
+    processing_status: Mapped[ProcessingStatus | None] = mapped_column(
+        Enum(
+            ProcessingStatus,
+            name="processingstatusenum",
+            create_type=False,
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=ProcessingStatus.PENDING,
+        nullable=True,
+        index=True,
+    )
+    last_crawl_started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_crawl_completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    processing_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Notes
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     

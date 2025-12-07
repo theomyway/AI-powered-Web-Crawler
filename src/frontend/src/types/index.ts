@@ -80,6 +80,8 @@ export interface CrawlSession {
 
 export type SourceStatus = 'active' | 'paused' | 'disabled' | 'error';
 
+export type ProcessingStatus = 'pending' | 'processing' | 'success' | 'failed';
+
 export interface CrawlSource {
   id: string;
   name: string;
@@ -95,5 +97,10 @@ export interface CrawlSource {
   total_opportunities_found: number;
   created_at: string;
   updated_at: string;
+  // Real-time processing status tracking
+  processing_status: ProcessingStatus | null;
+  last_crawl_started_at: string | null;
+  last_crawl_completed_at: string | null;
+  processing_error_message: string | null;
 }
 

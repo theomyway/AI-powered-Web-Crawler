@@ -144,6 +144,17 @@ export const sourcesApi = {
     });
     return response.data;
   },
+
+  /**
+   * Get all sources (for polling processing status).
+   * Fetches up to 100 sources to cover most use cases.
+   */
+  getAll: async (): Promise<CrawlSource[]> => {
+    const response = await api.get<PaginatedResponse<CrawlSource>>('/sources', {
+      params: { page: 1, page_size: 100 },
+    });
+    return response.data.items;
+  },
 };
 
 export default api;

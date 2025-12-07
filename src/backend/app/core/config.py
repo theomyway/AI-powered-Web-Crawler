@@ -98,6 +98,12 @@ class Settings(BaseSettings):
         description="Azure Function host key for authentication"
     )
 
+    # Backend URL for Azure Function callbacks
+    backend_url: str = Field(
+        default="http://localhost:8000",
+        description="Backend API URL for Azure Function callbacks"
+    )
+
     # Crawler Proxy (for geo-restricted sites)
     crawler_proxy_url: str | None = Field(
         default=None,

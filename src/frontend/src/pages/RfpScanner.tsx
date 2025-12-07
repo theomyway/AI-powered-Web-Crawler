@@ -1,9 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, Play, Plus, ExternalLink, ChevronDown, Wand2, Globe, Settings, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow, parseISO, isPast } from 'date-fns';
 import { opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
-import type { Opportunity, CrawlSource } from '../types';
+import type { Opportunity, CrawlSource, ProcessingStatus } from '../types';
 import type { UrlCrawlResponse, ExtractedOpportunity } from '../services/api';
+
+// Polling interval for processing status (30 seconds for responsive UI)
+const POLLING_INTERVAL_MS = 300 * 1000;
 
 // Category options matching the backend
 const CATEGORIES = [
@@ -128,6 +131,46 @@ export function RfpScanner() {
   const [scanMessage, setScanMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const [sources, setSources] = useState<CrawlSource[]>([]);
   const [scanResults, setScanResults] = useState<UrlCrawlResponse | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const previousProcessingRef = useRef<boolean>(false);
+
+  // Track if we're actively waiting for a scan to complete (for polling)
+  const [isPollingActive, setIsPollingActive] = useState(false);
+
+  // Track the timestamp when the last scan started (for highlighting new opportunities)
+  const [lastScanStartTime, setLastScanStartTime] = useState<string | null>(null);
+
+  // Normalize URL for comparison (remove trailing slashes, lowercase)
+  const normalizeUrl = useCallback((url: string): string => {
+    return url.toLowerCase().replace(/\/+$/, '');
+  }, []);
+
+  // Helper to get processing status for a URL from sources
+  // Supports both exact matches and partial matches (source base_url as prefix)
+  const getUrlProcessingStatus = useCallback((url: string): ProcessingStatus | null => {
+    const normalizedUrl = normalizeUrl(url);
+
+    // First try exact match
+    let source = sources.find(s => normalizeUrl(s.base_url) === normalizedUrl);
+
+    // If no exact match, try finding a source where the URL starts with the source's base_url
+    if (!source) {
+      source = sources.find(s => normalizedUrl.startsWith(normalizeUrl(s.base_url)));
+    }
+
+    return source?.processing_status || null;
+  }, [sources, normalizeUrl]);
+
+  // Check if any URL is currently processing (based on sources data)
+  const hasProcessingUrls = useCallback((): boolean => {
+    return urlList.some(url => getUrlProcessingStatus(url) === 'processing');
+  }, [urlList, getUrlProcessingStatus]);
+
+  // Helper to check if an opportunity was created after the last scan started
+  const isNewOpportunity = useCallback((opportunity: Opportunity): boolean => {
+    if (!lastScanStartTime) return false;
+    return new Date(opportunity.created_at) >= new Date(lastScanStartTime);
+  }, [lastScanStartTime]);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -141,20 +184,6 @@ export function RfpScanner() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const pageSize = 10;
-
-  // Save URLs to localStorage whenever urlList changes
-  useEffect(() => {
-    try {
-      localStorage.setItem(SCANNER_URLS_KEY, JSON.stringify(urlList));
-    } catch (error) {
-      console.error('Failed to save URLs to localStorage:', error);
-    }
-  }, [urlList]);
-
-  // Load sources on mount
-  useEffect(() => {
-    sourcesApi.list(1, 50).then(res => setSources(res.items)).catch(console.error);
-  }, []);
 
   // Fetch opportunities with filters
   const fetchOpportunities = useCallback(async () => {
@@ -179,9 +208,105 @@ export function RfpScanner() {
     }
   }, [page, searchQuery, categoryFilter, statusFilter, prequalRequired]);
 
+  // Fetch sources for status updates
+  const fetchSources = useCallback(async () => {
+    try {
+      const allSources = await sourcesApi.getAll();
+      // Debug: log sources with processing status
+      const processingUrls = allSources.filter(s => s.processing_status === 'processing');
+      if (processingUrls.length > 0) {
+        console.log('Sources currently processing:', processingUrls.map(s => s.base_url));
+      }
+      setSources(allSources);
+    } catch (error) {
+      console.error('Error fetching sources:', error);
+    }
+  }, []);
+
+  // Save URLs to localStorage whenever urlList changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCANNER_URLS_KEY, JSON.stringify(urlList));
+    } catch (error) {
+      console.error('Failed to save URLs to localStorage:', error);
+    }
+  }, [urlList]);
+
+  // Load sources on mount
+  useEffect(() => {
+    fetchSources();
+  }, [fetchSources]);
+
+  // Load opportunities on mount and when filters change
   useEffect(() => {
     fetchOpportunities();
   }, [fetchOpportunities]);
+
+  // Polling effect - poll when isPollingActive is true or any URL is processing
+  useEffect(() => {
+    // Clear any existing interval
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
+    const isCurrentlyProcessing = hasProcessingUrls();
+    const shouldPoll = isPollingActive || isCurrentlyProcessing;
+
+    // Check if we just finished processing (was processing, now not)
+    if (previousProcessingRef.current && !isCurrentlyProcessing && !isPollingActive) {
+      // Processing just completed - refresh opportunities immediately
+      console.log('Processing completed - refreshing opportunities');
+      fetchOpportunities();
+      setScanMessage({
+        type: 'success',
+        text: 'Scan completed! Opportunities have been updated.',
+      });
+      setScanProgress({ stage: 'complete', message: 'Scan complete!', details: '' });
+    }
+
+    // Update the previous processing state
+    previousProcessingRef.current = isCurrentlyProcessing;
+
+    // Start polling if we should be polling
+    if (shouldPoll) {
+      console.log('Starting polling - isPollingActive:', isPollingActive, 'hasProcessingUrls:', isCurrentlyProcessing);
+
+      pollingIntervalRef.current = setInterval(async () => {
+        console.log('Polling: fetching sources and opportunities...');
+        // Fetch sources to check status
+        await fetchSources();
+        // Also refresh opportunities periodically during processing
+        await fetchOpportunities();
+
+        // Check if processing is complete after fetching
+        // Note: This uses the callback version to get latest state
+      }, POLLING_INTERVAL_MS);
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [isPollingActive, hasProcessingUrls, fetchSources, fetchOpportunities]);
+
+  // Effect to stop polling when all URLs are done processing
+  useEffect(() => {
+    if (isPollingActive && !hasProcessingUrls() && sources.length > 0) {
+      // Check if any of our URLs have completed (not pending)
+      const ourSourceStatuses = urlList.map(url => getUrlProcessingStatus(url));
+      const allCompleted = ourSourceStatuses.every(status =>
+        status === 'success' || status === 'failed'
+      );
+
+      if (allCompleted) {
+        console.log('All URLs completed processing, stopping polling');
+        setIsPollingActive(false);
+      }
+    }
+  }, [isPollingActive, hasProcessingUrls, sources, urlList, getUrlProcessingStatus]);
 
   // Handle category checkbox toggle
   const toggleCategory = (value: string) => {
@@ -226,6 +351,10 @@ export function RfpScanner() {
       return;
     }
 
+    // Record the scan start time for highlighting new opportunities
+    const scanStartTime = new Date().toISOString();
+    setLastScanStartTime(scanStartTime);
+
     setIsScanning(true);
     setScanResults(null);
     setScanMessage(null);
@@ -253,37 +382,80 @@ export function RfpScanner() {
         categories: selectedCategories,
       });
 
+      // Immediately fetch sources to get updated processing status
+      await fetchSources();
+
       setScanResults(response);
 
       if (response.success) {
-        setScanProgress({
-          stage: 'complete',
-          message: 'Scan complete!',
-          details: `Found ${response.total_relevant} relevant opportunities`
-        });
-        setScanMessage({
-          type: 'success',
-          text: `Found ${response.total_relevant} relevant opportunities. ${response.saved_to_db} saved to database.`,
-        });
+        // Check if this was an async background scan (Azure Function) or sync scan (local)
+        const isBackgroundScan = response.message?.includes('background') || response.saved_to_db === 0;
 
-        // Refresh opportunities list
-        setTimeout(() => fetchOpportunities(), 1000);
+        if (isBackgroundScan) {
+          // Enable polling to check for status updates and new opportunities
+          setIsPollingActive(true);
+          previousProcessingRef.current = true; // Mark as currently processing
+
+          setScanProgress({
+            stage: 'analyzing',
+            message: 'Scan in progress...',
+            details: 'Processing in background - results will appear automatically'
+          });
+          setScanMessage({
+            type: 'info',
+            text: 'Scan started. Results will appear automatically when processing completes.',
+          });
+        } else {
+          setScanProgress({
+            stage: 'complete',
+            message: 'Scan complete!',
+            details: `Found ${response.total_relevant} relevant opportunities`
+          });
+          setScanMessage({
+            type: 'success',
+            text: `Found ${response.total_relevant} relevant opportunities. ${response.saved_to_db} saved to database.`,
+          });
+        }
+
+        // Refresh opportunities list and sources (for status updates)
+        setTimeout(() => {
+          fetchOpportunities();
+          fetchSources();
+        }, 1000);
       } else {
+        // Ensure error is a string
+        const errorText = response.error || 'Scan failed. Please try again.';
         setScanProgress({
           stage: 'error',
           message: 'Scan failed',
-          details: response.error || 'Unknown error'
+          details: errorText
         });
         setScanMessage({
           type: 'error',
-          text: response.error || 'Scan failed. Please try again.'
+          text: errorText
         });
       }
     } catch (error: any) {
       console.error('Scan error:', error);
-      const errorMessage = error.response?.data?.error
-        || error.message
-        || 'Failed to start scan. Please check your connection and try again.';
+      // Handle different error response formats
+      let errorMessage = 'Failed to start scan. Please check your connection and try again.';
+
+      if (error.response?.data) {
+        const data = error.response.data;
+        // Backend returns {code, message, details} format
+        if (typeof data.message === 'string') {
+          errorMessage = data.message;
+          if (data.details && typeof data.details === 'string') {
+            errorMessage += `: ${data.details}`;
+          }
+        } else if (typeof data.error === 'string') {
+          errorMessage = data.error;
+        } else if (typeof data === 'string') {
+          errorMessage = data;
+        }
+      } else if (error.message && typeof error.message === 'string') {
+        errorMessage = error.message;
+      }
 
       setScanProgress({
         stage: 'error',
@@ -388,23 +560,44 @@ export function RfpScanner() {
                 URLs to scan ({urlList.length}):
               </p>
               <div className="space-y-2 max-h-40 overflow-y-auto">
-                {urlList.map((url, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600"
-                  >
-                    <Globe className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <span className="flex-1 text-sm text-gray-700 dark:text-gray-300 truncate">{url}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveUrl(url)}
-                      className="p-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 rounded transition-colors"
-                      title="Remove URL"
+                {urlList.map((url, index) => {
+                  const processingStatus = getUrlProcessingStatus(url);
+                  return (
+                    <div
+                      key={index}
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600"
                     >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+                      <Globe className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      <span className="flex-1 text-sm text-gray-700 dark:text-gray-300 truncate">{url}</span>
+
+                      {/* Processing status indicator */}
+                      {processingStatus === 'processing' && (
+                        <span title="Processing...">
+                          <Loader2 className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" />
+                        </span>
+                      )}
+                      {processingStatus === 'success' && (
+                        <span title="Completed successfully">
+                          <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                        </span>
+                      )}
+                      {processingStatus === 'failed' && (
+                        <span title="Processing failed">
+                          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveUrl(url)}
+                        className="p-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 rounded transition-colors"
+                        title="Remove URL"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -432,20 +625,33 @@ export function RfpScanner() {
 
         {/* Start Scan Button and Last Scan Info */}
         <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            <span className="text-green-600 dark:text-green-400">✓</span> Last scan: recently - Found {totalOpportunities} opportunities
-          </p>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            {hasProcessingUrls() ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                <span>Processing in progress... (auto-refreshing every 10s)</span>
+              </span>
+            ) : (
+              <span>
+                <span className="text-green-600 dark:text-green-400">✓</span> Last scan: recently - Found {totalOpportunities} opportunities
+              </span>
+            )}
+          </div>
           <button
             onClick={handleStartScan}
-            disabled={isScanning}
+            disabled={isScanning || hasProcessingUrls()}
             className={`flex items-center gap-2 px-6 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-              isScanning
+              isScanning || hasProcessingUrls()
                 ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
           >
-            <Play className="w-4 h-4" />
-            {isScanning ? 'Scanning...' : 'Start Scan'}
+            {isScanning || hasProcessingUrls() ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
+            {isScanning ? 'Scanning...' : hasProcessingUrls() ? 'Processing...' : 'Start Scan'}
           </button>
         </div>
       </div>
@@ -572,12 +778,25 @@ export function RfpScanner() {
                   const deadline = formatDeadline(opp.submission_deadline);
                   const status = getStatusBadge(opp.status);
                   const primaryCategory = getPrimaryCategory(opp);
+                  const isNew = isNewOpportunity(opp);
                   return (
-                    <tr key={opp.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <tr
+                      key={opp.id}
+                      className={`hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                        isNew ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-400' : ''
+                      }`}
+                    >
                       <td className="px-6 py-4">
-                        <div className="max-w-xs">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{opp.title}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{formatPostedDate(opp.published_date)}</p>
+                        <div className="max-w-xs flex items-center gap-2">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{opp.title}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{formatPostedDate(opp.published_date)}</p>
+                          </div>
+                          {isNew && (
+                            <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200 rounded-full">
+                              New
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4">

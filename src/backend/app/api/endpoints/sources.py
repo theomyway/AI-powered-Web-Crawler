@@ -5,6 +5,7 @@ Provides CRUD operations for managing crawl sources (government portals,
 press release feeds, etc.) through configuration-driven approach.
 """
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -15,11 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import DuplicateEntityException, EntityNotFoundException
 from app.core.logging import get_logger
 from app.db.session import get_db
-from app.models.crawl_source import CrawlSource, SourceStatus, SourceType
+from app.models.crawl_source import CrawlSource, ProcessingStatus, SourceStatus, SourceType
 from app.schemas.crawl_source import (
     CrawlSourceCreate,
     CrawlSourceResponse,
     CrawlSourceUpdate,
+    ProcessingStatusUpdate,
 )
 from app.schemas.common import PaginatedResponse, SuccessResponse
 
@@ -181,6 +183,55 @@ async def delete_source(db: DB, source_id: UUID) -> SuccessResponse:
     
     await db.delete(source)
     logger.info("Crawl source deleted", source_id=str(source_id))
-    
+
     return SuccessResponse(message=f"Source '{source.name}' deleted successfully")
 
+
+@router.patch("/{source_id}/status", response_model=CrawlSourceResponse)
+async def update_source_processing_status(
+    db: DB,
+    source_id: UUID,
+    data: ProcessingStatusUpdate,
+) -> CrawlSourceResponse:
+    """
+    Update the processing status of a crawl source.
+
+    This endpoint is called by the Azure Function to report crawl completion.
+    It updates the processing_status field and related timestamps.
+    """
+    result = await db.execute(
+        select(CrawlSource).where(CrawlSource.id == source_id)
+    )
+    source = result.scalar_one_or_none()
+
+    if not source:
+        raise EntityNotFoundException("CrawlSource", str(source_id))
+
+    # Update processing status
+    source.processing_status = data.processing_status
+    source.last_crawl_completed_at = datetime.utcnow()
+
+    # Update error message if status is failed
+    if data.processing_status == ProcessingStatus.FAILED:
+        source.processing_error_message = data.processing_error_message
+        source.last_error_message = data.processing_error_message
+    else:
+        source.processing_error_message = None
+        source.last_success_at = datetime.utcnow()
+
+    # Update opportunities found if provided
+    if data.opportunities_found is not None:
+        source.total_opportunities_found = (
+            source.total_opportunities_found + data.opportunities_found
+        )
+
+    await db.flush()
+    await db.refresh(source)
+
+    logger.info(
+        "Source processing status updated",
+        source_id=str(source_id),
+        processing_status=data.processing_status.value,
+    )
+
+    return CrawlSourceResponse.model_validate(source)

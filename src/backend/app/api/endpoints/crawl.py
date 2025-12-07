@@ -22,7 +22,7 @@ from app.core.exceptions import EntityNotFoundException, ValidationException
 from app.core.logging import get_logger
 from app.db.session import get_db
 from app.models.crawl_session import CrawlSession, CrawlSessionStatus
-from app.models.crawl_source import CrawlSource, SourceStatus
+from app.models.crawl_source import CrawlSource, ProcessingStatus, SourceStatus
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.schemas.common import PaginatedResponse, SuccessResponse
 
@@ -142,133 +142,194 @@ async def scan_urls(
         categories=request.categories,
     )
 
+    # Find or create CrawlSource for each URL and set processing status
+    source_ids = []
+    for url in request.urls:
+        # Try to find existing source by base_url (exact match)
+        result = await db.execute(
+            select(CrawlSource).where(CrawlSource.base_url == url)
+        )
+        source = result.scalar_one_or_none()
+
+        # If no exact match, try with/without trailing slash
+        if not source:
+            alt_url = url.rstrip('/') if url.endswith('/') else url + '/'
+            result = await db.execute(
+                select(CrawlSource).where(CrawlSource.base_url == alt_url)
+            )
+            source = result.scalar_one_or_none()
+
+        if source:
+            # Update processing status to 'processing'
+            source.processing_status = ProcessingStatus.PROCESSING
+            source.last_crawl_started_at = datetime.utcnow()
+            source.processing_error_message = None
+            source_ids.append(str(source.id))
+            logger.info(f"Found existing source for URL: {url}, source_id: {source.id}")
+        else:
+            # Auto-create a simple source for ad-hoc URLs to enable status tracking
+            from urllib.parse import urlparse
+            from app.models.crawl_source import SourceType
+
+            parsed = urlparse(url)
+            domain = parsed.netloc or 'unknown'
+
+            # Create a minimal source configuration
+            new_source = CrawlSource(
+                name=f"Ad-hoc: {domain}",
+                source_type=SourceType.GOVERNMENT_PORTAL,
+                state_code="XX",  # Unknown state for ad-hoc sources
+                base_url=url,
+                config={
+                    "selectors": {},
+                    "pagination": {"type": "link", "max_pages": 1}
+                },
+                is_enabled=True,
+                processing_status=ProcessingStatus.PROCESSING,
+                last_crawl_started_at=datetime.utcnow(),
+            )
+            db.add(new_source)
+            await db.flush()  # Get the ID
+            source_ids.append(str(new_source.id))
+            logger.info(f"Created new ad-hoc source for URL: {url}, source_id: {new_source.id}")
+
+    # Commit the processing status immediately so it's visible to frontend
+    await db.commit()
+
+    # Try Azure Function first
+    function_url = settings.azure_function_url
+
+    if function_url:
+        # Normalize URL - remove trailing /api/crawl if present to avoid duplication
+        function_url = function_url.rstrip('/')
+        if function_url.endswith('/api/crawl'):
+            function_url = function_url[:-len('/api/crawl')]
+
+        # Define synchronous wrapper for background task
+        # (FastAPI BackgroundTasks requires sync function for async work)
+        def call_azure_function_sync():
+            import asyncio
+
+            async def _call():
+                try:
+                    async with httpx.AsyncClient(timeout=600.0) as client:
+                        response = await client.post(
+                            f"{function_url}/api/crawl",
+                            json={
+                                "urls": request.urls,
+                                "crawl_session_id": crawl_session_id,
+                                "categories": request.categories,
+                                "source_ids": source_ids,
+                                "backend_url": str(settings.backend_url),
+                            }
+                        )
+                        logger.info(f"Azure Function responded with status: {response.status_code}")
+                except Exception as e:
+                    logger.error(f"Azure Function call failed: {e}")
+
+            # Run the async function in a new event loop
+            asyncio.run(_call())
+
+        # Use FastAPI's BackgroundTasks for proper lifecycle management
+        background_tasks.add_task(call_azure_function_sync)
+
+        # Return immediately - Azure Function will update status via callback
+        return UrlCrawlResponse(
+            success=True,
+            crawl_session_id=crawl_session_id,
+            results=[],
+            total_relevant=0,
+            saved_to_db=0,
+            message="Scan started. Processing in background - check back for results."
+        )
+
+    # No Azure Function configured - fall back to local crawler
     try:
-        # Try Azure Function first
-        function_url = settings.azure_function_url if hasattr(settings, 'azure_function_url') else None
+        from app.services.local_crawler import LocalCrawlerService
 
-        if function_url:
-            # Call Azure Function
-            # The Azure Function now saves opportunities directly to the database
-            # and returns a summary response instead of full results
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{function_url}/api/crawl",
-                    json={
-                        "urls": request.urls,
-                        "crawl_session_id": crawl_session_id,
-                        "categories": request.categories,
-                    }
-                )
+        crawler = LocalCrawlerService()
+        result = await crawler.crawl_urls(request.urls, request.categories)
 
-                if response.status_code == 200:
-                    result = response.json()
+        # Convert results to dict format for saving
+        results_as_dicts = result.results
 
-                    # Azure Function now saves directly to DB and returns summary
-                    saved_count = result.get("saved_to_db", 0)
-                    db_error = result.get("db_error")
+        # Save to database
+        saved_count = await _save_opportunities_to_db(db, results_as_dicts, crawl_session_id)
 
-                    if db_error:
-                        logger.warning(f"Azure Function DB save error: {db_error}")
+        # Update sources to success
+        await _update_sources_status(db, source_ids, ProcessingStatus.SUCCESS)
 
-                    # Create summary results for response (one per URL)
-                    summary_results = []
-                    for url in request.urls:
-                        summary_results.append(UrlCrawlResult(
-                            url=url,
-                            success=True,
-                            total_found=result.get("total_found", 0) // len(request.urls),
-                            relevant_count=result.get("total_relevant", 0) // len(request.urls),
-                            opportunities=[],  # Not returned in new format
-                            crawl_duration=result.get("processing_time", 0) / len(request.urls)
-                        ))
-
-                    message = f"Crawl completed. {saved_count} opportunities saved to database."
-                    if db_error:
-                        message += f" (DB Warning: {db_error})"
-
-                    return UrlCrawlResponse(
-                        success=True,
-                        crawl_session_id=crawl_session_id,
-                        results=summary_results,
-                        total_relevant=result.get("total_relevant", 0),
-                        saved_to_db=saved_count,
-                        message=message
-                    )
-                else:
-                    logger.error(f"Azure Function error: {response.text}")
-
-        # Fallback to local crawl
-        # For MVP, we'll use the services directly if available
-        try:
-            from app.services.local_crawler import LocalCrawlerService
-
-            crawler = LocalCrawlerService()
-            result = await crawler.crawl_urls(request.urls, request.categories)
-
-            # Convert results to dict format for saving
-            results_as_dicts = result.results
-
-            # Save to database
-            saved_count = await _save_opportunities_to_db(db, results_as_dicts, crawl_session_id)
-
-            # Convert to response format
-            url_results = [
-                UrlCrawlResult(
-                    url=r.get("url", ""),
-                    success=r.get("success", False),
-                    total_found=r.get("total_found", 0),
-                    relevant_count=r.get("relevant_count", 0),
-                    opportunities=[
-                        ExtractedOpportunity(**opp) for opp in r.get("opportunities", [])
-                    ],
-                    error=r.get("error"),
-                    crawl_duration=r.get("crawl_duration"),
-                )
-                for r in results_as_dicts
-            ]
-
-            return UrlCrawlResponse(
-                success=True,
-                crawl_session_id=crawl_session_id,
-                results=url_results,
-                total_relevant=result.total_relevant,
-                saved_to_db=saved_count,
-                message="Crawl completed successfully"
+        # Convert to response format
+        url_results = [
+            UrlCrawlResult(
+                url=r.get("url", ""),
+                success=r.get("success", False),
+                total_found=r.get("total_found", 0),
+                relevant_count=r.get("relevant_count", 0),
+                opportunities=[
+                    ExtractedOpportunity(**opp) for opp in r.get("opportunities", [])
+                ],
+                error=r.get("error"),
+                crawl_duration=r.get("crawl_duration"),
             )
+            for r in results_as_dicts
+        ]
 
-        except ImportError as e:
-            logger.warning(f"Local crawler import failed: {e}")
-            # Services not available locally
-            return UrlCrawlResponse(
-                success=False,
-                crawl_session_id=crawl_session_id,
-                error="Crawler services not configured. Please set up Azure Functions or local services.",
-                message="Configuration required"
-            )
-        except ValueError as e:
-            # Azure OpenAI not configured
-            return UrlCrawlResponse(
-                success=False,
-                crawl_session_id=crawl_session_id,
-                error=str(e),
-                message="Configuration required"
-            )
+        return UrlCrawlResponse(
+            success=True,
+            crawl_session_id=crawl_session_id,
+            results=url_results,
+            total_relevant=result.total_relevant,
+            saved_to_db=saved_count,
+            message="Crawl completed successfully"
+        )
 
-    except httpx.TimeoutException:
+    except ImportError as e:
+        logger.warning(f"Local crawler import failed: {e}")
+        await _update_sources_status(db, source_ids, ProcessingStatus.FAILED, "Crawler services not configured")
         return UrlCrawlResponse(
             success=False,
             crawl_session_id=crawl_session_id,
-            error="Request timed out. The target website may be slow or geo-blocked.",
-            message="Timeout error"
+            error="Crawler services not configured. Please set up Azure Functions or local services.",
+            message="Configuration required"
         )
     except Exception as e:
         logger.exception("URL scan failed", error=str(e))
+        await _update_sources_status(db, source_ids, ProcessingStatus.FAILED, str(e))
         return UrlCrawlResponse(
             success=False,
             crawl_session_id=crawl_session_id,
             error=str(e),
             message="Crawl failed"
         )
+
+
+async def _update_sources_status(
+    db: AsyncSession,
+    source_ids: list[str | None],
+    status: ProcessingStatus,
+    error_message: str | None = None,
+) -> None:
+    """Update processing status for sources."""
+    from uuid import UUID
+
+    for source_id in source_ids:
+        if source_id is None:
+            continue
+        try:
+            result = await db.execute(
+                select(CrawlSource).where(CrawlSource.id == UUID(source_id))
+            )
+            source = result.scalar_one_or_none()
+            if source:
+                source.processing_status = status
+                source.last_crawl_completed_at = datetime.utcnow()
+                if error_message:
+                    source.processing_error_message = error_message
+        except Exception as e:
+            logger.warning(f"Failed to update source status: {e}")
+
+    await db.commit()
 
 
 async def _save_opportunities_to_db(
