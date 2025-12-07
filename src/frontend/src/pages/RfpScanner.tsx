@@ -147,6 +147,7 @@ export function RfpScanner() {
 
   // Helper to get processing status for a URL from sources
   // Supports both exact matches and partial matches (source base_url as prefix)
+  // Only returns status if the source was scanned in the current session
   const getUrlProcessingStatus = useCallback((url: string): ProcessingStatus | null => {
     const normalizedUrl = normalizeUrl(url);
 
@@ -158,8 +159,26 @@ export function RfpScanner() {
       source = sources.find(s => normalizedUrl.startsWith(normalizeUrl(s.base_url)));
     }
 
-    return source?.processing_status || null;
-  }, [sources, normalizeUrl]);
+    if (!source) return null;
+
+    // Only show status if the source was scanned in the current session
+    // This prevents showing stale status when re-adding a URL
+    if (lastScanStartTime && source.last_crawl_started_at) {
+      const sourceStartTime = new Date(source.last_crawl_started_at);
+      const sessionStartTime = new Date(lastScanStartTime);
+      // Only show status if the crawl started at or after the current session
+      if (sourceStartTime >= sessionStartTime) {
+        return source.processing_status || null;
+      }
+    }
+
+    // If currently polling (scan in progress), show 'processing' status for URLs being scanned
+    if (isPollingActive && source.processing_status === 'processing') {
+      return 'processing';
+    }
+
+    return null;
+  }, [sources, normalizeUrl, lastScanStartTime, isPollingActive]);
 
   // Check if any URL is currently processing (based on sources data)
   const hasProcessingUrls = useCallback((): boolean => {
@@ -360,8 +379,8 @@ export function RfpScanner() {
     setScanMessage(null);
     setScanProgress({
       stage: 'fetching',
-      message: 'Fetching page content...',
-      details: `Scanning ${urlList.length} URL(s)`
+      message: 'Crawling...',
+      details: `Crawling ${urlList.length} URL(s)`
     });
 
     try {
@@ -629,7 +648,7 @@ export function RfpScanner() {
             {hasProcessingUrls() ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                <span>Processing in progress... (auto-refreshing every 10s)</span>
+                <span>Crawling in progress..</span>
               </span>
             ) : (
               <span>
