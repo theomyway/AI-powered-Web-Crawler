@@ -1,4 +1,4 @@
-"""
+﻿"""
 Azure Function: RFP Crawler (Unified)
 
 Single HTTP-triggered function that handles the complete crawling flow:
@@ -31,7 +31,8 @@ from shared.document_processor import DocumentProcessorService
 from shared.models import OpportunityCategory, ExtractedRFP
 from shared.db_service import save_opportunities_to_db
 
-logger = logging.getLogger(__name__)
+# Configure logging for Azure Functions - use root logger directly
+logging.basicConfig(level=logging.INFO)
 
 
 def log_step(step_num: int, step_name: str, status: str,
@@ -44,7 +45,7 @@ def log_step(step_num: int, step_name: str, status: str,
     if metrics:
         metrics_str = ", ".join(f"{k}={v}" for k, v in metrics.items())
         log_msg += f" | {metrics_str}"
-    logger.info(f"{timestamp} - {log_msg}")
+    logging.info(f"{timestamp} - {log_msg}")
 
 
 async def callback_processing_status(
@@ -65,7 +66,7 @@ async def callback_processing_status(
         opportunities_found: Number of opportunities found
     """
     if not backend_url or not source_id:
-        logger.warning("Cannot callback: missing backend_url or source_id")
+        logging.warning("Cannot callback: missing backend_url or source_id")
         return
 
     try:
@@ -80,11 +81,57 @@ async def callback_processing_status(
             response = await client.patch(url, json=payload)
 
             if response.status_code == 200:
-                logger.info(f"Successfully updated processing status for source {source_id} to {status}")
+                logging.info(f"Successfully updated processing status for source {source_id} to {status}")
             else:
-                logger.warning(f"Failed to update processing status: {response.status_code} - {response.text}")
+                logging.warning(f"Failed to update processing status: {response.status_code} - {response.text}")
     except Exception as e:
-        logger.error(f"Error calling back to backend: {e}")
+        logging.error(f"Error calling back to backend: {e}")
+
+
+async def callback_progress_update(
+    backend_url: str,
+    source_id: str,
+    progress_percent: int,
+    progress_message: str = None,
+    current_processing_url: str = None
+):
+    """
+    Callback to the backend to update real-time progress.
+
+    Args:
+        backend_url: Base URL of the backend API
+        source_id: UUID of the crawl source
+        progress_percent: Progress percentage (0-100)
+        progress_message: Human-readable progress message
+        current_processing_url: URL currently being processed
+    """
+    # VERY FIRST LINE - this MUST appear in logs
+    logging.info(f"=== PROGRESS CALLBACK ENTERED === percent={progress_percent}, backend={backend_url}, source={source_id}")
+
+    if not backend_url or not source_id:
+        logging.warning(f"Progress update skipped: backend_url={backend_url}, source_id={source_id}")
+        return  # Skip silently for ad-hoc URLs without source_id
+
+    try:
+        url = f"{backend_url}/api/v1/sources/{source_id}/progress"
+        payload = {
+            "progress_percent": min(max(progress_percent, 0), 100),
+            "progress_message": progress_message,
+            "current_processing_url": current_processing_url[:500] if current_processing_url else None
+        }
+
+        logging.info(f"Sending progress update: {progress_percent}% to {url}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.patch(url, json=payload)
+
+            if response.status_code != 200:
+                logging.warning(f"Progress update response: {response.status_code} - {response.text}")
+            else:
+                logging.info(f"Progress update successful: {progress_percent}%")
+    except Exception as e:
+        # Don't fail the crawl if progress update fails
+        logging.error(f"Progress update failed: {e}")
 
 
 async def process_single_url(
@@ -93,11 +140,35 @@ async def process_single_url(
     classifier: AIClassifierService,
     doc_processor: DocumentProcessorService,
     state_code: str = "TN",
-    enable_stage2: bool = True
+    enable_stage2: bool = True,
+    # Progress tracking parameters
+    url_index: int = 1,
+    total_urls: int = 1,
+    backend_url: str = None,
+    source_id: str = None
 ) -> dict:
     """Process a single URL: fetch HTML, extract, classify, and optionally deep-analyze RFPs."""
     log_step(0, "URL Processing", "started", metrics={"url": url[:80] + "..." if len(url) > 80 else url})
     url_start_time = time.time()
+
+    # Calculate progress for this URL (each URL gets an equal slice)
+    # Progress stages within a URL: 10% start, 30% fetched, 50% extracted, 70% classifying, 90% classified, 100% done
+    url_progress_base = ((url_index - 1) / total_urls) * 100
+    url_progress_slice = 100 / total_urls
+
+    def calc_progress(stage_percent: float) -> int:
+        """Calculate overall progress: base + (stage_percent * this_url's_slice)"""
+        return int(url_progress_base + (stage_percent / 100) * url_progress_slice)
+
+    # Report starting this URL
+    logging.info(f">>> CALLING PROGRESS CALLBACK: backend_url={backend_url}, source_id={source_id}")
+    await callback_progress_update(
+        backend_url, source_id,
+        calc_progress(10),
+        f"Starting URL {url_index}/{total_urls}",
+        url
+    )
+    logging.info(">>> PROGRESS CALLBACK RETURNED")
 
     # Step 1-5: Fetch HTML content (async) - detailed logging in PageCrawlerService
     crawl_result = await crawler.fetch_page(url)
@@ -119,14 +190,38 @@ async def process_single_url(
     log_step(6, "HTML Fetched", "success",
             metrics={"html_chars": len(crawl_result.html_content)})
 
+    # Report page loaded
+    await callback_progress_update(
+        backend_url, source_id,
+        calc_progress(30),
+        f"Page loaded ({url_index}/{total_urls})",
+        url
+    )
+
     # Step 6-10: Extract and classify RFPs using GPT-4o (Stage 1)
+    # Report AI classification starting
+    await callback_progress_update(
+        backend_url, source_id,
+        calc_progress(50),
+        f"Extracting content ({url_index}/{total_urls})",
+        url
+    )
+
     try:
+        # Report AI classification in progress
+        await callback_progress_update(
+            backend_url, source_id,
+            calc_progress(70),
+            f"AI classification ({url_index}/{total_urls})",
+            url
+        )
+
         extracted_rfps = classifier.extract_and_classify_page(
             crawl_result.html_content,
             url
         )
     except Exception as e:
-        logger.error(f"Classification failed for {url}: {e}")
+        logging.error(f"Classification failed for {url}: {e}")
         return {
             "url": url,
             "success": False,
@@ -137,23 +232,31 @@ async def process_single_url(
             "crawl_duration": time.time() - url_start_time
         }
 
+    # Report classification complete
+    await callback_progress_update(
+        backend_url, source_id,
+        calc_progress(90),
+        f"Classification complete ({url_index}/{total_urls})",
+        url
+    )
+
     # === STAGE 2: Deep Analysis for Relevant Opportunities ===
     if enable_stage2:
         relevant_rfps = [rfp for rfp in extracted_rfps if rfp.is_relevant]
 
         if relevant_rfps:
-            logger.info("\n" + "=" * 70)
-            logger.info("=== STEP 3: STAGE 2 - DOCUMENT INTELLIGENCE & DEEP ANALYSIS ===")
-            logger.info("=" * 70)
-            logger.info(f"Processing {len(relevant_rfps)} relevant opportunities with Document Intelligence")
+            logging.info("\n" + "=" * 70)
+            logging.info("=== STEP 3: STAGE 2 - DOCUMENT INTELLIGENCE & DEEP ANALYSIS ===")
+            logging.info("=" * 70)
+            logging.info(f"Processing {len(relevant_rfps)} relevant opportunities with Document Intelligence")
 
             for i, rfp in enumerate(relevant_rfps, 1):
                 if not rfp.document_url:
-                    logger.info(f"  [{i}] {rfp.document_id}: No document URL, skipping Stage 2")
+                    logging.info(f"  [{i}] {rfp.document_id}: No document URL, skipping Stage 2")
                     continue
 
-                logger.info(f"\n  [{i}] Processing: {rfp.document_id} - {rfp.event_name[:50]}...")
-                logger.info(f"      Document URL: {rfp.document_url[:60]}...")
+                logging.info(f"\n  [{i}] Processing: {rfp.document_id} - {rfp.event_name[:50]}...")
+                logging.info(f"      Document URL: {rfp.document_url[:60]}...")
 
                 try:
                     # Download PDF
@@ -161,19 +264,19 @@ async def process_single_url(
                     doc_bytes, download_error = await crawler.download_document(rfp.document_url)
 
                     if download_error:
-                        logger.warning(f"      Download failed: {download_error}")
+                        logging.warning(f"      Download failed: {download_error}")
                         continue
 
-                    logger.info(f"      Downloaded: {len(doc_bytes):,} bytes")
+                    logging.info(f"      Downloaded: {len(doc_bytes):,} bytes")
 
                     # Extract text using Document Intelligence (first 4 pages)
                     extracted_text, extract_error = doc_processor.extract_text_from_bytes(doc_bytes)
 
                     if extract_error:
-                        logger.warning(f"      Text extraction failed: {extract_error}")
+                        logging.warning(f"      Text extraction failed: {extract_error}")
                         continue
 
-                    logger.info(f"      Extracted: {len(extracted_text):,} characters from PDF")
+                    logging.info(f"      Extracted: {len(extracted_text):,} characters from PDF")
 
                     # Deep analysis with GPT-4o (Stage 2)
                     deep_result = classifier.deep_analyze_document(extracted_text, rfp)
@@ -202,23 +305,23 @@ async def process_single_url(
 
                     # Check if classification changed
                     if old_category != deep_result.confirmed_category.value:
-                        logger.info(f"      ⚡ Category CHANGED: {old_category} → {deep_result.confirmed_category.value}")
+                        logging.info(f"      âš¡ Category CHANGED: {old_category} â†’ {deep_result.confirmed_category.value}")
                     else:
-                        logger.info(f"      ✓ Category CONFIRMED: {deep_result.confirmed_category.value}")
+                        logging.info(f"      âœ“ Category CONFIRMED: {deep_result.confirmed_category.value}")
 
-                    logger.info(f"      Confidence: {old_confidence:.2f} → {deep_result.category_confidence:.2f}")
-                    logger.info(f"      Prequalification Required: {deep_result.requires_prequalification}")
+                    logging.info(f"      Confidence: {old_confidence:.2f} â†’ {deep_result.category_confidence:.2f}")
+                    logging.info(f"      Prequalification Required: {deep_result.requires_prequalification}")
                     if deep_result.requires_prequalification:
-                        logger.info(f"      Prequal Deadline: {deep_result.prequalification_deadline}")
-                        logger.info(f"      Prequal Details: {len(deep_result.prequalification_details)} requirements")
-                    logger.info(f"      Summary: {deep_result.summary[:100]}...")
-                    logger.info(f"      Stage 2 Duration: {time.time() - stage2_start:.2f}s")
+                        logging.info(f"      Prequal Deadline: {deep_result.prequalification_deadline}")
+                        logging.info(f"      Prequal Details: {len(deep_result.prequalification_details)} requirements")
+                    logging.info(f"      Summary: {deep_result.summary[:100]}...")
+                    logging.info(f"      Stage 2 Duration: {time.time() - stage2_start:.2f}s")
 
                 except Exception as e:
-                    logger.error(f"      Stage 2 error for {rfp.document_id}: {e}")
+                    logging.error(f"      Stage 2 error for {rfp.document_id}: {e}")
                     continue
 
-            logger.info("\n" + "=" * 70)
+            logging.info("\n" + "=" * 70)
 
     # Convert to dict for JSON response
     opportunities_dict = []
@@ -232,15 +335,15 @@ async def process_single_url(
     total_duration = time.time() - url_start_time
 
     # === ENHANCED LOGGING: FINAL STRUCTURED OUTPUT ===
-    logger.info("\n" + "=" * 70)
-    logger.info("=== STEP 4: FINAL STRUCTURED OUTPUT ===")
-    logger.info("=" * 70)
-    logger.info(f"URL: {url}")
-    logger.info(f"Processing Duration: {total_duration:.2f}s")
-    logger.info(f"\n--- SUMMARY ---")
-    logger.info(f"Total Opportunities Found: {len(extracted_rfps)}")
-    logger.info(f"Relevant Opportunities: {relevant_count}")
-    logger.info(f"Not Relevant: {len(extracted_rfps) - relevant_count}")
+    logging.info("\n" + "=" * 70)
+    logging.info("=== STEP 4: FINAL STRUCTURED OUTPUT ===")
+    logging.info("=" * 70)
+    logging.info(f"URL: {url}")
+    logging.info(f"Processing Duration: {total_duration:.2f}s")
+    logging.info(f"\n--- SUMMARY ---")
+    logging.info(f"Total Opportunities Found: {len(extracted_rfps)}")
+    logging.info(f"Relevant Opportunities: {relevant_count}")
+    logging.info(f"Not Relevant: {len(extracted_rfps) - relevant_count}")
 
     # Category breakdown
     category_counts = {}
@@ -248,26 +351,26 @@ async def process_single_url(
         cat = rfp.predicted_category.value
         category_counts[cat] = category_counts.get(cat, 0) + 1
 
-    logger.info(f"\n--- CATEGORY BREAKDOWN ---")
+    logging.info(f"\n--- CATEGORY BREAKDOWN ---")
     for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
-        logger.info(f"  {cat}: {count}")
+        logging.info(f"  {cat}: {count}")
 
     # List relevant opportunities
     relevant_rfps = [rfp for rfp in extracted_rfps if rfp.is_relevant]
     if relevant_rfps:
-        logger.info(f"\n--- RELEVANT OPPORTUNITIES DETAILS ---")
+        logging.info(f"\n--- RELEVANT OPPORTUNITIES DETAILS ---")
         for i, rfp in enumerate(relevant_rfps, 1):
-            logger.info(f"\n  [{i}] {rfp.document_id}")
-            logger.info(f"      Name: {rfp.event_name}")
-            logger.info(f"      Category: {rfp.predicted_category.value}")
-            logger.info(f"      Confidence: {rfp.classification_confidence:.2f}")
-            logger.info(f"      Due Date: {rfp.response_due_date}")
+            logging.info(f"\n  [{i}] {rfp.document_id}")
+            logging.info(f"      Name: {rfp.event_name}")
+            logging.info(f"      Category: {rfp.predicted_category.value}")
+            logging.info(f"      Confidence: {rfp.classification_confidence:.2f}")
+            logging.info(f"      Due Date: {rfp.response_due_date}")
             if rfp.document_url:
-                logger.info(f"      Document: {rfp.document_url[:70]}...")
+                logging.info(f"      Document: {rfp.document_url[:70]}...")
 
-    logger.info("\n" + "=" * 70)
-    logger.info("=== FINAL JSON RESPONSE PREVIEW ===")
-    logger.info("=" * 70)
+    logging.info("\n" + "=" * 70)
+    logging.info("=== FINAL JSON RESPONSE PREVIEW ===")
+    logging.info("=" * 70)
     # Show truncated JSON preview
     result_preview = {
         "url": url[:60] + "..." if len(url) > 60 else url,
@@ -279,8 +382,8 @@ async def process_single_url(
             for o in opportunities_dict[:5]
         ]
     }
-    logger.info(json.dumps(result_preview, indent=2))
-    logger.info("=" * 70 + "\n")
+    logging.info(json.dumps(result_preview, indent=2))
+    logging.info("=" * 70 + "\n")
 
     log_step(11, "URL Processing", "completed", duration=total_duration,
             metrics={
@@ -288,6 +391,14 @@ async def process_single_url(
                 "relevant": relevant_count,
                 "not_relevant": len(extracted_rfps) - relevant_count
             })
+
+    # Report URL complete (100% of this URL's slice)
+    await callback_progress_update(
+        backend_url, source_id,
+        calc_progress(100),
+        f"URL {url_index}/{total_urls} complete",
+        url
+    )
 
     return {
         "url": url,
@@ -323,9 +434,9 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     """
     start_time = time.time()
 
-    logger.info("=" * 80)
-    logger.info("RFP CRAWLER FUNCTION TRIGGERED")
-    logger.info("=" * 80)
+    logging.info("=" * 80)
+    logging.info("RFP CRAWLER FUNCTION TRIGGERED")
+    logging.info("=" * 80)
 
     # Track source_ids and backend_url for callbacks
     source_ids = []
@@ -339,6 +450,9 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         state_code = req_body.get("state_code", "TN")
         source_ids = req_body.get("source_ids", [])  # Source IDs for callback
         backend_url = req_body.get("backend_url")  # Backend URL for callback
+
+        # DEBUG: Log the actual values of callback parameters
+        logging.info(f"!!! CALLBACK PARAMS: backend_url={backend_url}, source_ids={source_ids}")
 
         if not urls:
             return func.HttpResponse(
@@ -369,13 +483,21 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         total_found = 0
 
         for i, url in enumerate(urls, 1):
-            logger.info(f"\n{'='*60}")
-            logger.info(f"Processing URL {i}/{len(urls)}")
-            logger.info(f"{'='*60}")
+            logging.info(f"\n{'='*60}")
+            logging.info(f"Processing URL {i}/{len(urls)}")
+            logging.info(f"{'='*60}")
+
+            # Get source_id for this URL (source_ids are parallel to urls)
+            source_id = source_ids[i - 1] if i - 1 < len(source_ids) else None
 
             url_result = await process_single_url(
                 url, crawler, classifier, doc_processor,
-                state_code, enable_stage2
+                state_code, enable_stage2,
+                # Progress tracking parameters
+                url_index=i,
+                total_urls=len(urls),
+                backend_url=backend_url,
+                source_id=source_id
             )
             results.append(url_result)
             total_relevant += url_result.get("relevant_count", 0)
@@ -384,23 +506,23 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         processing_time = time.time() - start_time
 
         # === STEP 5: SAVE OPPORTUNITIES TO DATABASE ===
-        logger.info("\n" + "=" * 80)
-        logger.info("=== STEP 5: SAVING OPPORTUNITIES TO DATABASE ===")
-        logger.info("=" * 80)
+        logging.info("\n" + "=" * 80)
+        logging.info("=== STEP 5: SAVING OPPORTUNITIES TO DATABASE ===")
+        logging.info("=" * 80)
 
         saved_count = 0
         db_error = None
         try:
             saved_count = save_opportunities_to_db(results, crawl_session_id)
-            logger.info(f"Successfully saved {saved_count} opportunities to database")
+            logging.info(f"Successfully saved {saved_count} opportunities to database")
         except Exception as e:
             db_error = str(e)
-            logger.error(f"Database save failed: {e}", exc_info=True)
+            logging.error(f"Database save failed: {e}", exc_info=True)
 
         # Final summary
-        logger.info("\n" + "=" * 80)
-        logger.info("CRAWL SESSION COMPLETE")
-        logger.info("=" * 80)
+        logging.info("\n" + "=" * 80)
+        logging.info("CRAWL SESSION COMPLETE")
+        logging.info("=" * 80)
         log_step(12, "Session Complete", "success", duration=processing_time, metrics={
             "urls_processed": len(urls),
             "total_opportunities": total_found,
@@ -445,7 +567,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except ValueError as e:
-        logger.error(f"Invalid request: {e}")
+        logging.error(f"Invalid request: {e}")
         # Callback with failure status
         if backend_url and source_ids:
             for source_id in source_ids:
@@ -462,7 +584,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logging.error(f"Unexpected error: {e}", exc_info=True)
         # Callback with failure status
         if backend_url and source_ids:
             for source_id in source_ids:

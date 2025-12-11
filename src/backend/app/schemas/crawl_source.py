@@ -186,6 +186,11 @@ class CrawlSourceResponse(CrawlSourceBase):
     last_crawl_completed_at: datetime | None = None
     processing_error_message: str | None = None
 
+    # Real-time progress tracking
+    progress_percent: int | None = Field(default=0, ge=0, le=100)
+    current_processing_url: str | None = None
+    progress_message: str | None = None
+
 
 class ProcessingStatusUpdate(BaseModel):
     """Schema for updating processing status from Azure Function callback."""
@@ -196,3 +201,20 @@ class ProcessingStatusUpdate(BaseModel):
     processing_error_message: str | None = None
     opportunities_found: int | None = None
 
+
+class ProgressUpdate(BaseModel):
+    """Schema for real-time progress updates from Azure Function."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    progress_percent: int = Field(ge=0, le=100, description="Progress percentage 0-100")
+    progress_message: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Human-readable progress message"
+    )
+    current_processing_url: str | None = Field(
+        default=None,
+        max_length=500,
+        description="URL currently being processed"
+    )

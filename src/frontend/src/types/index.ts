@@ -102,5 +102,9 @@ export interface CrawlSource {
   last_crawl_started_at: string | null;
   last_crawl_completed_at: string | null;
   processing_error_message: string | null;
+  // Real-time progress tracking
+  progress_percent: number | null;
+  current_processing_url: string | null;
+  progress_message: string | null;
 }
 

@@ -160,6 +160,24 @@ class CrawlSource(Base, TimestampMixin):
     last_crawl_completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     processing_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Real-time progress tracking
+    progress_percent: Mapped[int | None] = mapped_column(
+        Integer,
+        default=0,
+        nullable=True,
+        comment="Current crawl progress percentage (0-100)",
+    )
+    current_processing_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="URL currently being processed",
+    )
+    progress_message: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Human-readable progress message",
+    )
+
     # Notes
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     

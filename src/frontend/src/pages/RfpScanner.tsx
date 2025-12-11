@@ -3,10 +3,13 @@ import { Search, Play, Plus, ExternalLink, ChevronDown, Wand2, Globe, Settings, 
 import { formatDistanceToNow, parseISO, isPast } from 'date-fns';
 import { opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
 import type { Opportunity, CrawlSource, ProcessingStatus } from '../types';
-import type { UrlCrawlResponse, ExtractedOpportunity } from '../services/api';
+import type { UrlCrawlResponse } from '../services/api';
 
-// Polling interval for processing status (30 seconds for responsive UI)
-const POLLING_INTERVAL_MS = 300 * 1000;
+// Polling interval for processing status (10 seconds for responsive progress updates)
+const POLLING_INTERVAL_MS = 10 * 1000;
+
+// Progress bar animation duration in ms
+const PROGRESS_ANIMATION_DURATION = 300;
 
 // Category options matching the backend
 const CATEGORIES = [
@@ -130,8 +133,8 @@ export function RfpScanner() {
   }>({ stage: 'idle', message: '' });
   const [scanMessage, setScanMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const [sources, setSources] = useState<CrawlSource[]>([]);
-  const [scanResults, setScanResults] = useState<UrlCrawlResponse | null>(null);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [_scanResults, setScanResults] = useState<UrlCrawlResponse | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previousProcessingRef = useRef<boolean>(false);
 
   // Track if we're actively waiting for a scan to complete (for polling)
@@ -139,6 +142,12 @@ export function RfpScanner() {
 
   // Track the timestamp when the last scan started (for highlighting new opportunities)
   const [lastScanStartTime, setLastScanStartTime] = useState<string | null>(null);
+
+  // Progress bar state (0-100)
+  const [progressPercent, setProgressPercent] = useState<number>(0);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  // Track which URLs were being scanned for progress calculation
+  const scanningUrlsRef = useRef<string[]>([]);
 
   // Normalize URL for comparison (remove trailing slashes, lowercase)
   const normalizeUrl = useCallback((url: string): string => {
@@ -184,6 +193,91 @@ export function RfpScanner() {
   const hasProcessingUrls = useCallback((): boolean => {
     return urlList.some(url => getUrlProcessingStatus(url) === 'processing');
   }, [urlList, getUrlProcessingStatus]);
+
+  // Calculate scan progress percentage based on URL processing status
+  // Uses real progress_percent from backend if available
+  const calculateProgress = useCallback((): number => {
+    const urlsToCheck = scanningUrlsRef.current;
+    if (urlsToCheck.length === 0) return 0;
+
+    // Try to get real progress from sources with progress_percent
+    // Find the source that is currently processing
+    for (const url of urlsToCheck) {
+      const normalizedUrl = normalizeUrl(url);
+      const source = sources.find(s => normalizeUrl(s.base_url) === normalizedUrl) ||
+                     sources.find(s => normalizedUrl.startsWith(normalizeUrl(s.base_url)));
+
+      if (source?.processing_status === 'processing' && source.progress_percent !== null) {
+        // Return real progress from backend
+        return source.progress_percent;
+      }
+    }
+
+    // Fallback: Calculate progress based on completed URLs count
+    let completedCount = 0;
+    let processingCount = 0;
+
+    for (const url of urlsToCheck) {
+      const status = getUrlProcessingStatus(url);
+      if (status === 'success' || status === 'failed') {
+        completedCount++;
+      } else if (status === 'processing') {
+        processingCount++;
+      }
+    }
+
+    // Calculate base progress from completed URLs
+    const baseProgress = (completedCount / urlsToCheck.length) * 100;
+
+    // Add partial progress for currently processing URL (estimate 50% through)
+    const processingBonus = processingCount > 0 ? (50 / urlsToCheck.length) : 0;
+
+    return Math.min(Math.round(baseProgress + processingBonus), 99);
+  }, [sources, normalizeUrl, getUrlProcessingStatus]);
+
+  // Effect to update progress bar when sources change
+  useEffect(() => {
+    if (showProgressBar) {
+      // Check if there are any sources still processing
+      const processingSources = sources.filter(s => s.processing_status === 'processing');
+
+      if (processingSources.length > 0) {
+        // Get the max progress from all processing sources
+        const maxProgress = Math.max(
+          ...processingSources.map(s => s.progress_percent ?? 0)
+        );
+        setProgressPercent(maxProgress);
+      } else if (scanningUrlsRef.current.length > 0) {
+        // Fallback to local tracking
+        const newProgress = calculateProgress();
+        setProgressPercent(newProgress);
+
+        // Check if all URLs are complete
+        const allComplete = scanningUrlsRef.current.every(url => {
+          const status = getUrlProcessingStatus(url);
+          return status === 'success' || status === 'failed';
+        });
+
+        if (allComplete) {
+          // Animate to 100% then hide
+          setProgressPercent(100);
+          setTimeout(() => {
+            setShowProgressBar(false);
+            setProgressPercent(0);
+            scanningUrlsRef.current = [];
+          }, 800); // Brief delay to show 100% complete
+        }
+      } else {
+        // No sources processing and no local tracking - hide progress bar
+        // This happens when all processing is complete
+        setProgressPercent(100);
+        setTimeout(() => {
+          setShowProgressBar(false);
+          setProgressPercent(0);
+        }, 800);
+      }
+    }
+  }, [sources, showProgressBar, calculateProgress, getUrlProcessingStatus]);
 
   // Helper to check if an opportunity was created after the last scan started
   const isNewOpportunity = useCallback((opportunity: Opportunity): boolean => {
@@ -255,6 +349,45 @@ export function RfpScanner() {
   useEffect(() => {
     fetchSources();
   }, [fetchSources]);
+
+  // Restore state on mount - check if there are any sources currently processing
+  // This handles the case when user navigates away and comes back
+  useEffect(() => {
+    const checkForProcessingSources = async () => {
+      try {
+        const allSources = await sourcesApi.getAll();
+        const processingSources = allSources.filter(s => s.processing_status === 'processing');
+
+        if (processingSources.length > 0) {
+          console.log('Found processing sources on mount:', processingSources.map(s => s.base_url));
+
+          // Restore the scanning URLs from processing sources
+          const processingUrls = processingSources.map(s => s.base_url);
+          scanningUrlsRef.current = processingUrls;
+
+          // Show progress bar with current progress
+          const maxProgress = Math.max(
+            ...processingSources.map(s => s.progress_percent ?? 0)
+          );
+          setProgressPercent(maxProgress || 5);
+          setShowProgressBar(true);
+
+          // Start polling to track progress
+          setIsPollingActive(true);
+          previousProcessingRef.current = true;
+
+          // Update sources state
+          setSources(allSources);
+        }
+      } catch (error) {
+        console.error('Error checking for processing sources:', error);
+      }
+    };
+
+    checkForProcessingSources();
+    // Only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load opportunities on mount and when filters change
   useEffect(() => {
@@ -374,6 +507,11 @@ export function RfpScanner() {
     const scanStartTime = new Date().toISOString();
     setLastScanStartTime(scanStartTime);
 
+    // Initialize progress bar with a small initial value to show immediate feedback
+    scanningUrlsRef.current = [...urlList];
+    setProgressPercent(5);
+    setShowProgressBar(true);
+
     setIsScanning(true);
     setScanResults(null);
     setScanMessage(null);
@@ -453,6 +591,10 @@ export function RfpScanner() {
           type: 'error',
           text: errorText
         });
+        // Hide progress bar on error
+        setShowProgressBar(false);
+        setProgressPercent(0);
+        scanningUrlsRef.current = [];
       }
     } catch (error: any) {
       console.error('Scan error:', error);
@@ -482,6 +624,10 @@ export function RfpScanner() {
         details: errorMessage
       });
       setScanMessage({ type: 'error', text: errorMessage });
+      // Hide progress bar on error
+      setShowProgressBar(false);
+      setProgressPercent(0);
+      scanningUrlsRef.current = [];
     } finally {
       setIsScanning(false);
     }
@@ -643,35 +789,51 @@ export function RfpScanner() {
         </div>
 
         {/* Start Scan Button and Last Scan Info */}
-        <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <div className="text-sm text-gray-500 dark:text-gray-400">
-            {hasProcessingUrls() ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                <span>Crawling in progress..</span>
-              </span>
-            ) : (
-              <span>
-                <span className="text-green-600 dark:text-green-400">✓</span> Last scan: recently - Found {totalOpportunities} opportunities
-              </span>
-            )}
+        <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
+          {/* Status and Button Row */}
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              {hasProcessingUrls() ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                  <span>Crawling in progress..</span>
+                </span>
+              ) : (
+                <span>
+                  <span className="text-green-600 dark:text-green-400">✓</span> Last scan: recently - Found {totalOpportunities} opportunities
+                </span>
+              )}
+            </div>
+            <button
+              onClick={handleStartScan}
+              disabled={isScanning || hasProcessingUrls()}
+              className={`flex items-center gap-2 px-6 py-2.5 text-sm font-medium rounded-lg transition-colors ${
+                isScanning || hasProcessingUrls()
+                  ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              {isScanning || hasProcessingUrls() ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+              {isScanning ? 'Scanning...' : hasProcessingUrls() ? 'Processing...' : 'Start Scan'}
+            </button>
           </div>
-          <button
-            onClick={handleStartScan}
-            disabled={isScanning || hasProcessingUrls()}
-            className={`flex items-center gap-2 px-6 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-              isScanning || hasProcessingUrls()
-                ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
-            {isScanning || hasProcessingUrls() ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
-            {isScanning ? 'Scanning...' : hasProcessingUrls() ? 'Processing...' : 'Start Scan'}
-          </button>
+
+          {/* Progress Bar - Only visible during scanning */}
+          {showProgressBar && (
+            <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-green-500 rounded-full transition-all ease-out"
+                style={{
+                  width: `${progressPercent}%`,
+                  transitionDuration: `${PROGRESS_ANIMATION_DURATION}ms`,
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
 

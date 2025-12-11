@@ -213,8 +213,13 @@ async def scan_urls(
             async def _call():
                 try:
                     async with httpx.AsyncClient(timeout=600.0) as client:
+                        # Build request URL with function key if available
+                        request_url = f"{function_url}/api/crawl"
+                        if settings.azure_function_key:
+                            request_url += f"?code={settings.azure_function_key}"
+
                         response = await client.post(
-                            f"{function_url}/api/crawl",
+                            request_url,
                             json={
                                 "urls": request.urls,
                                 "crawl_session_id": crawl_session_id,

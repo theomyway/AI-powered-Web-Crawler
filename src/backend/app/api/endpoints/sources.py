@@ -22,6 +22,7 @@ from app.schemas.crawl_source import (
     CrawlSourceResponse,
     CrawlSourceUpdate,
     ProcessingStatusUpdate,
+    ProgressUpdate,
 )
 from app.schemas.common import PaginatedResponse, SuccessResponse
 
@@ -225,6 +226,12 @@ async def update_source_processing_status(
             source.total_opportunities_found + data.opportunities_found
         )
 
+    # Reset progress fields when crawl completes
+    if data.processing_status in (ProcessingStatus.SUCCESS, ProcessingStatus.FAILED):
+        source.progress_percent = 0
+        source.progress_message = None
+        source.current_processing_url = None
+
     await db.flush()
     await db.refresh(source)
 
@@ -232,6 +239,46 @@ async def update_source_processing_status(
         "Source processing status updated",
         source_id=str(source_id),
         processing_status=data.processing_status.value,
+    )
+
+    return CrawlSourceResponse.model_validate(source)
+
+
+@router.patch("/{source_id}/progress", response_model=CrawlSourceResponse)
+async def update_source_progress(
+    db: DB,
+    source_id: UUID,
+    data: ProgressUpdate,
+) -> CrawlSourceResponse:
+    """
+    Update the real-time progress of a crawl source.
+
+    This endpoint is called by the Azure Function during crawl processing
+    to report granular progress updates at each step.
+    """
+    result = await db.execute(
+        select(CrawlSource).where(CrawlSource.id == source_id)
+    )
+    source = result.scalar_one_or_none()
+
+    if not source:
+        raise EntityNotFoundException("CrawlSource", str(source_id))
+
+    # Update progress fields
+    source.progress_percent = data.progress_percent
+    if data.progress_message is not None:
+        source.progress_message = data.progress_message
+    if data.current_processing_url is not None:
+        source.current_processing_url = data.current_processing_url
+
+    await db.flush()
+    await db.refresh(source)
+
+    logger.debug(
+        "Source progress updated",
+        source_id=str(source_id),
+        progress_percent=data.progress_percent,
+        progress_message=data.progress_message,
     )
 
     return CrawlSourceResponse.model_validate(source)

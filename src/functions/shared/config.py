@@ -28,8 +28,8 @@ class Settings:
     crawler_proxy_url: str | None
     crawler_proxy_username: str | None
     crawler_proxy_password: str | None
-    crawler_timeout: int
-    crawler_navigation_timeout: int
+    crawler_timeout: int  # Timeout in milliseconds
+    crawler_navigation_timeout: int  # Navigation timeout in milliseconds
     crawler_user_agent: str
 
     # Crawler Settings - Retry & Resilience
@@ -68,8 +68,9 @@ def get_settings() -> Settings:
         crawler_proxy_url=os.environ.get("CRAWLER_PROXY_URL") or None,
         crawler_proxy_username=os.environ.get("CRAWLER_PROXY_USERNAME") or None,
         crawler_proxy_password=os.environ.get("CRAWLER_PROXY_PASSWORD") or None,
-        crawler_timeout=int(os.environ.get("CRAWLER_TIMEOUT", "90")),
-        crawler_navigation_timeout=int(os.environ.get("CRAWLER_NAVIGATION_TIMEOUT", "120")),
+        # Timeouts in milliseconds - Playwright expects ms
+        crawler_timeout=int(os.environ.get("CRAWLER_TIMEOUT", "90000")),  # 90 seconds
+        crawler_navigation_timeout=int(os.environ.get("CRAWLER_NAVIGATION_TIMEOUT", "120000")),  # 120 seconds
         crawler_user_agent=os.environ.get("CRAWLER_USER_AGENT", ""),  # Empty = use stealth rotation
 
         # Crawler - Retry & Resilience
