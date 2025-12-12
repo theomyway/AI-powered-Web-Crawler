@@ -39,16 +39,13 @@ class OpportunityStatus(str, enum.Enum):
 
 class OpportunityCategory(str, enum.Enum):
     """Technology category classification."""
-    
-    DYNAMICS = "dynamics"           # Microsoft Dynamics 365/CRM
-    AI = "ai"                       # Artificial Intelligence / ML
-    IOT = "iot"                     # Internet of Things
-    ERP = "erp"                     # Enterprise Resource Planning
-    STAFF_AUGMENTATION = "staff_augmentation"  # IT Staffing
-    CLOUD = "cloud"                 # Cloud services
-    CYBERSECURITY = "cybersecurity" # Security services
-    DATA_ANALYTICS = "data_analytics"  # BI/Analytics
-    OTHER = "other"                 # Other technology
+
+    DYNAMICS_365 = "dynamics_365"           # Microsoft Dynamics 365
+    AI = "ai"                               # Artificial Intelligence
+    IOT = "iot"                             # Internet of Things
+    ERP = "erp"                             # Enterprise Resource Planning
+    STAFF_AUGMENTATION = "staff_augmentation"  # Staff Augmentation
+    OTHER_IT = "other_it"                   # Other (IT related)
 
 
 class Opportunity(Base, TimestampMixin, SoftDeleteMixin):

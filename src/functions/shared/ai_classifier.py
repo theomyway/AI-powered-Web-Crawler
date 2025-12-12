@@ -33,7 +33,7 @@ def normalize_category(raw_category: str, is_relevant: bool = False) -> Opportun
     Handles various formats GPT might return like "AI", "Artificial Intelligence", "ai", etc.
     """
     if not raw_category:
-        return OpportunityCategory.NOT_RELEVANT if not is_relevant else OpportunityCategory.OTHER
+        return OpportunityCategory.NOT_RELEVANT if not is_relevant else OpportunityCategory.OTHER_IT
 
     # Convert to lowercase for matching
     cat_lower = raw_category.lower().strip()
@@ -55,12 +55,13 @@ def normalize_category(raw_category: str, is_relevant: bool = False) -> Opportun
         "chatbot": OpportunityCategory.AI,
         "nlp": OpportunityCategory.AI,
 
-        # Dynamics variations
-        "microsoft dynamics": OpportunityCategory.DYNAMICS,
-        "dynamics 365": OpportunityCategory.DYNAMICS,
-        "d365": OpportunityCategory.DYNAMICS,
-        "crm": OpportunityCategory.DYNAMICS,
-        "power platform": OpportunityCategory.DYNAMICS,
+        # Dynamics 365 variations
+        "microsoft dynamics": OpportunityCategory.DYNAMICS_365,
+        "dynamics 365": OpportunityCategory.DYNAMICS_365,
+        "dynamics": OpportunityCategory.DYNAMICS_365,
+        "d365": OpportunityCategory.DYNAMICS_365,
+        "crm": OpportunityCategory.DYNAMICS_365,
+        "power platform": OpportunityCategory.DYNAMICS_365,
 
         # ERP variations
         "enterprise resource planning": OpportunityCategory.ERP,
@@ -81,26 +82,26 @@ def normalize_category(raw_category: str, is_relevant: bool = False) -> Opportun
         "consulting": OpportunityCategory.STAFF_AUGMENTATION,
         "professional services": OpportunityCategory.STAFF_AUGMENTATION,
 
-        # Cloud variations
-        "cloud services": OpportunityCategory.CLOUD,
-        "azure": OpportunityCategory.CLOUD,
-        "aws": OpportunityCategory.CLOUD,
-        "cloud infrastructure": OpportunityCategory.CLOUD,
-        "saas": OpportunityCategory.CLOUD,
-        "contact center": OpportunityCategory.CLOUD,
-
-        # Cybersecurity variations
-        "security": OpportunityCategory.CYBERSECURITY,
-        "infosec": OpportunityCategory.CYBERSECURITY,
-        "information security": OpportunityCategory.CYBERSECURITY,
-        "risk management": OpportunityCategory.CYBERSECURITY,
-
-        # Data analytics variations
-        "business intelligence": OpportunityCategory.DATA_ANALYTICS,
-        "bi": OpportunityCategory.DATA_ANALYTICS,
-        "analytics": OpportunityCategory.DATA_ANALYTICS,
-        "data warehouse": OpportunityCategory.DATA_ANALYTICS,
-        "reporting": OpportunityCategory.DATA_ANALYTICS,
+        # Other IT variations (covers cloud, cybersecurity, data analytics, etc.)
+        "cloud services": OpportunityCategory.OTHER_IT,
+        "azure": OpportunityCategory.OTHER_IT,
+        "aws": OpportunityCategory.OTHER_IT,
+        "cloud infrastructure": OpportunityCategory.OTHER_IT,
+        "cloud": OpportunityCategory.OTHER_IT,
+        "saas": OpportunityCategory.OTHER_IT,
+        "contact center": OpportunityCategory.OTHER_IT,
+        "security": OpportunityCategory.OTHER_IT,
+        "cybersecurity": OpportunityCategory.OTHER_IT,
+        "infosec": OpportunityCategory.OTHER_IT,
+        "information security": OpportunityCategory.OTHER_IT,
+        "risk management": OpportunityCategory.OTHER_IT,
+        "business intelligence": OpportunityCategory.OTHER_IT,
+        "bi": OpportunityCategory.OTHER_IT,
+        "analytics": OpportunityCategory.OTHER_IT,
+        "data_analytics": OpportunityCategory.OTHER_IT,
+        "data warehouse": OpportunityCategory.OTHER_IT,
+        "reporting": OpportunityCategory.OTHER_IT,
+        "other": OpportunityCategory.OTHER_IT,
 
         # Not relevant
         "not relevant": OpportunityCategory.NOT_RELEVANT,
@@ -113,7 +114,7 @@ def normalize_category(raw_category: str, is_relevant: bool = False) -> Opportun
             return category
 
     # Default based on relevance
-    return OpportunityCategory.OTHER if is_relevant else OpportunityCategory.NOT_RELEVANT
+    return OpportunityCategory.OTHER_IT if is_relevant else OpportunityCategory.NOT_RELEVANT
 
 
 # Approximate tokens per character (for GPT-4)
@@ -123,30 +124,23 @@ MAX_CHUNK_TOKENS = 25000  # Process in chunks of ~25k tokens
 
 # Target categories for classification
 TARGET_CATEGORIES = """
-1. Microsoft Dynamics - Microsoft Dynamics 365, CRM, ERP, Power Platform, Business Central
-2. Artificial Intelligence (AI) - AI, Machine Learning, ML, NLP, Computer Vision, Chatbots, Generative AI
-3. Internet of Things (IoT) - IoT, Smart Devices, Sensors, Connected Systems, Smart City, Smart Building
-4. Enterprise Resource Planning (ERP) - ERP, SAP, Oracle, NetSuite, Financial Systems, Supply Chain
+1. Dynamics 365 - Microsoft Dynamics 365, CRM, Power Platform, Business Central, D365 implementations
+2. AI - Artificial Intelligence, Machine Learning, ML, NLP, Computer Vision, Chatbots, Generative AI
+3. IoT - Internet of Things, Smart Devices, Sensors, Connected Systems, Smart City, Smart Building
+4. ERP - Enterprise Resource Planning, SAP, Oracle, NetSuite, Financial Systems, Supply Chain
 5. Staff Augmentation - IT Staffing, Technical Consultants, Contract Developers, Professional Services
-6. Cloud Services - Azure, AWS, Cloud Migration, Cloud Infrastructure, SaaS, PaaS
-7. Cybersecurity - Security, Infosec, SOC, SIEM, Penetration Testing, Compliance
-8. Data Analytics - BI, Business Intelligence, Data Warehouse, Reporting, Power BI, Tableau
+6. Other (IT related) - Cloud services, Cybersecurity, Data Analytics, Software Development, IT Infrastructure
 """
 
 STAGE1_SYSTEM_PROMPT = """You are an expert RFP analyst for MazikUSA, a technology company. Your task is to extract RFP/RFQ/RFI opportunities and classify their relevance.
 
 CORE BUSINESS FOCUS (mark as RELEVANT if opportunity relates to):
-1. Microsoft Dynamics 365 - CRM, ERP, Power Platform, Business Central, D365 implementations → category: "dynamics"
-2. Artificial Intelligence (AI) - Machine Learning, NLP, Chatbots, AI Agents, Generative AI, predictive analytics → category: "ai"
-3. Internet of Things (IoT) - Smart devices, sensors, connected systems, smart city/building solutions → category: "iot"
-4. Enterprise Resource Planning (ERP) - SAP, Oracle, financial systems, supply chain management → category: "erp"
+1. Dynamics 365 - Microsoft Dynamics 365, CRM, Power Platform, Business Central, D365 implementations → category: "dynamics_365"
+2. AI - Artificial Intelligence, Machine Learning, NLP, Chatbots, AI Agents, Generative AI, predictive analytics → category: "ai"
+3. IoT - Internet of Things, Smart devices, sensors, connected systems, smart city/building solutions → category: "iot"
+4. ERP - Enterprise Resource Planning, SAP, Oracle, financial systems, supply chain management → category: "erp"
 5. Staff Augmentation - IT staffing, technical consultants, software developers, professional IT services → category: "staff_augmentation"
-
-ALSO CONSIDER RELEVANT:
-- Cloud services and infrastructure (Azure, AWS) → category: "cloud"
-- Business intelligence and data analytics platforms → category: "data_analytics"
-- Cybersecurity and IT security solutions → category: "cybersecurity"
-- Software development and system integration projects → choose most appropriate category above, or "other"
+6. Other (IT related) - Cloud services, Cybersecurity, Data Analytics, Software Development, IT Infrastructure → category: "other_it"
 
 MARK AS NOT RELEVANT (category: "not_relevant"):
 - Construction, building maintenance, janitorial services
@@ -156,7 +150,7 @@ MARK AS NOT RELEVANT (category: "not_relevant"):
 - Inspections (electrical, building) unless IT-related
 
 VALID CATEGORY VALUES (use EXACT lowercase values):
-"dynamics", "ai", "iot", "erp", "staff_augmentation", "cloud", "cybersecurity", "data_analytics", "other", "not_relevant"
+"dynamics_365", "ai", "iot", "erp", "staff_augmentation", "other_it", "not_relevant"
 
 CLASSIFICATION THRESHOLD:
 - Use confidence >= 0.65 for borderline cases (balanced approach)
@@ -522,7 +516,7 @@ RFP METADATA:
 
 Analyze the document and respond with a JSON object:
 {{
-  "confirmed_category": "dynamics|ai|iot|erp|staff_augmentation|cloud|cybersecurity|data_analytics|other|not_relevant",
+  "confirmed_category": "dynamics_365|ai|iot|erp|staff_augmentation|other_it|not_relevant",
   "category_confidence": 0.95,
   "summary": "2-3 sentence summary",
   "scope_of_work": "Detailed scope description",

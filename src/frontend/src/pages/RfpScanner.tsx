@@ -13,14 +13,12 @@ const PROGRESS_ANIMATION_DURATION = 300;
 
 // Category options matching the backend
 const CATEGORIES = [
-  { value: 'ai', label: 'Artificial Intelligence' },
-  { value: 'dynamics', label: 'Microsoft Dynamics' },
-  { value: 'iot', label: 'IoT / Smart Systems' },
-  { value: 'erp', label: 'ERP Systems' },
+  { value: 'dynamics_365', label: 'Dynamics 365' },
+  { value: 'ai', label: 'AI' },
+  { value: 'iot', label: 'IoT' },
+  { value: 'erp', label: 'ERP' },
   { value: 'staff_augmentation', label: 'Staff Augmentation' },
-  { value: 'cloud', label: 'Cloud Services' },
-  { value: 'cybersecurity', label: 'Cybersecurity' },
-  { value: 'data_analytics', label: 'Data Analytics' },
+  { value: 'other_it', label: 'Other (IT related)' },
 ];
 
 const STATUS_OPTIONS = [
@@ -39,29 +37,25 @@ const STATUS_OPTIONS = [
 // Helper functions (same as OpportunitiesTable)
 function getCategoryColor(category: string | null): string {
   const colors: Record<string, string> = {
-    dynamics: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    dynamics_365: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
     ai: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
     iot: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-300',
     erp: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
     staff_augmentation: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
-    cloud: 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300',
-    cybersecurity: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-    data_analytics: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+    other_it: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
   };
   return colors[category?.toLowerCase() || ''] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
 }
 
 function formatCategoryLabel(category: string | null): string {
-  if (!category) return 'Other';
+  if (!category) return 'Other (IT related)';
   const labels: Record<string, string> = {
-    dynamics: 'Dynamics 365',
-    ai: 'AI/ML',
+    dynamics_365: 'Dynamics 365',
+    ai: 'AI',
     iot: 'IoT',
     erp: 'ERP',
-    staff_augmentation: 'Staff Aug',
-    cloud: 'Cloud',
-    cybersecurity: 'Cybersecurity',
-    data_analytics: 'Analytics',
+    staff_augmentation: 'Staff Augmentation',
+    other_it: 'Other (IT related)',
   };
   return labels[category.toLowerCase()] || category;
 }

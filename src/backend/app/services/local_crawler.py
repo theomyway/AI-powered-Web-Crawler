@@ -179,8 +179,11 @@ For EACH opportunity, extract:
 - last_updated: Last update date
 
 Classify each as RELEVANT or NOT RELEVANT based on:
-RELEVANT: IT, software, AI, cloud, cybersecurity, ERP, CRM, consulting, professional services
+RELEVANT: IT, software, AI, IoT, ERP, Dynamics 365, CRM, consulting, professional services, Staff Augmentation
 NOT RELEVANT: Construction, janitorial, food, medical supplies, vehicles, printing, furniture
+
+VALID CATEGORY VALUES (use EXACT values):
+"dynamics_365", "ai", "iot", "erp", "staff_augmentation", "other_it", "not_relevant"
 
 Return JSON:
 {

@@ -10,16 +10,13 @@ from typing import Any
 
 class OpportunityCategory(str, Enum):
     """Target technology categories for classification."""
-    DYNAMICS = "dynamics"           # Microsoft Dynamics 365/CRM
-    AI = "ai"                       # Artificial Intelligence / ML
-    IOT = "iot"                     # Internet of Things
-    ERP = "erp"                     # Enterprise Resource Planning
-    STAFF_AUGMENTATION = "staff_augmentation"  # IT Staffing
-    CLOUD = "cloud"                 # Cloud services
-    CYBERSECURITY = "cybersecurity" # Security services
-    DATA_ANALYTICS = "data_analytics"  # BI/Analytics
-    OTHER = "other"                 # Other technology
-    NOT_RELEVANT = "not_relevant"   # Not in our target categories
+    DYNAMICS_365 = "dynamics_365"           # Dynamics 365
+    AI = "ai"                               # AI
+    IOT = "iot"                             # IoT
+    ERP = "erp"                             # ERP
+    STAFF_AUGMENTATION = "staff_augmentation"  # Staff Augmentation
+    OTHER_IT = "other_it"                   # Other (IT related)
+    NOT_RELEVANT = "not_relevant"           # Not in our target categories
 
 
 @dataclass
