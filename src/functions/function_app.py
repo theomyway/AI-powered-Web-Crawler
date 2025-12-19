@@ -10,7 +10,7 @@ import azure.functions as func
 from rfp_crawler import main as rfp_crawler_main
 
 # Create the Function App
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
 @app.route(route="crawl", methods=["POST"])

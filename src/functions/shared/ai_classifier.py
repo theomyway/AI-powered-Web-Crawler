@@ -122,7 +122,17 @@ CHARS_PER_TOKEN = 4
 MAX_INPUT_TOKENS = 100000  # GPT-4o-128k input limit (leaving buffer for response)
 MAX_CHUNK_TOKENS = 25000  # Process in chunks of ~25k tokens
 
-# Target categories for classification
+# All available categories for classification
+ALL_CATEGORIES = {
+    "dynamics_365": "Dynamics 365 - Microsoft Dynamics 365, CRM, Power Platform, Business Central, D365 implementations",
+    "ai": "AI - Artificial Intelligence, Machine Learning, ML, NLP, Computer Vision, Chatbots, Generative AI, predictive analytics",
+    "iot": "IoT - Internet of Things, Smart Devices, Sensors, Connected Systems, Smart City, Smart Building",
+    "erp": "ERP - Enterprise Resource Planning, SAP, Oracle, NetSuite, Financial Systems, Supply Chain",
+    "staff_augmentation": "Staff Augmentation - IT Staffing, Technical Consultants, Contract Developers, Professional Services",
+    "other_it": "Other (IT related) - Cloud services, Cybersecurity, Data Analytics, Software Development, IT Infrastructure",
+}
+
+# Target categories for classification (used in Stage 2 deep analysis)
 TARGET_CATEGORIES = """
 1. Dynamics 365 - Microsoft Dynamics 365, CRM, Power Platform, Business Central, D365 implementations
 2. AI - Artificial Intelligence, Machine Learning, ML, NLP, Computer Vision, Chatbots, Generative AI
@@ -132,49 +142,89 @@ TARGET_CATEGORIES = """
 6. Other (IT related) - Cloud services, Cybersecurity, Data Analytics, Software Development, IT Infrastructure
 """
 
-STAGE1_SYSTEM_PROMPT = """You are an expert RFP analyst for MazikUSA, a technology company. Your task is to extract RFP/RFQ/RFI opportunities and classify their relevance.
 
-CORE BUSINESS FOCUS (mark as RELEVANT if opportunity relates to):
-1. Dynamics 365 - Microsoft Dynamics 365, CRM, Power Platform, Business Central, D365 implementations → category: "dynamics_365"
-2. AI - Artificial Intelligence, Machine Learning, NLP, Chatbots, AI Agents, Generative AI, predictive analytics → category: "ai"
-3. IoT - Internet of Things, Smart devices, sensors, connected systems, smart city/building solutions → category: "iot"
-4. ERP - Enterprise Resource Planning, SAP, Oracle, financial systems, supply chain management → category: "erp"
-5. Staff Augmentation - IT staffing, technical consultants, software developers, professional IT services → category: "staff_augmentation"
-6. Other (IT related) - Cloud services, Cybersecurity, Data Analytics, Software Development, IT Infrastructure → category: "other_it"
+def build_stage1_prompt(selected_categories: list[str] | None = None) -> str:
+    """
+    Build the Stage 1 classification prompt dynamically based on selected categories.
 
-MARK AS NOT RELEVANT (category: "not_relevant"):
+    Args:
+        selected_categories: List of category keys (e.g., ["ai", "dynamics_365"]).
+                            If None or empty, uses all categories.
+
+    Returns:
+        System prompt string for GPT-4o
+    """
+    # Use all categories if none selected
+    if not selected_categories:
+        selected_categories = list(ALL_CATEGORIES.keys())
+
+    # Build category descriptions for selected categories only
+    category_lines = []
+    valid_categories = []
+    for i, cat_key in enumerate(selected_categories, 1):
+        if cat_key in ALL_CATEGORIES:
+            category_lines.append(f'{i}. {ALL_CATEGORIES[cat_key]} → category: "{cat_key}"')
+            valid_categories.append(f'"{cat_key}"')
+
+    # NO automatic fallback to other_it - only use categories the user selected
+    # If user didn't select other_it, it should NOT be used
+
+    categories_text = "\n".join(category_lines)
+    valid_values = ", ".join(valid_categories) + ', "not_relevant"'
+
+    return f"""You are an expert RFP analyst for MazikUSA, a technology company. Your task is to extract RFP/RFQ/RFI opportunities and classify their relevance.
+
+ALLOWED CATEGORIES - You may ONLY classify opportunities into these user-selected categories:
+{categories_text}
+
+STRICT CLASSIFICATION RULES:
+1. For each opportunity, evaluate if it matches ANY of the allowed categories above
+2. Use a 50% MATCH THRESHOLD - if the opportunity relates to a category by at least 50%, assign that category
+3. Be LENIENT within allowed categories: If an opportunity has partial overlap with an allowed category, assign it
+4. IMPORTANT: If an opportunity does NOT match any of the allowed categories by at least 50%, mark it as "not_relevant" with is_relevant=false
+5. Do NOT use any category that is not in the allowed list above
+
+MARK AS NOT RELEVANT (category: "not_relevant", is_relevant: false):
+- Any opportunity that doesn't match the allowed categories by at least 50%
 - Construction, building maintenance, janitorial services
 - Medical equipment, pharmaceuticals, healthcare staffing
 - Vehicles, transportation, landscaping
 - Food services, printing, office supplies
-- Inspections (electrical, building) unless IT-related
+- Inspections (electrical, building) unless matching an allowed category
 
-VALID CATEGORY VALUES (use EXACT lowercase values):
-"dynamics_365", "ai", "iot", "erp", "staff_augmentation", "other_it", "not_relevant"
+VALID CATEGORY VALUES (use EXACT lowercase values - NO OTHER VALUES ALLOWED):
+{valid_values}
 
-CLASSIFICATION THRESHOLD:
-- Use confidence >= 0.65 for borderline cases (balanced approach)
-- Be inclusive for technology-adjacent opportunities
-- When uncertain, lean towards RELEVANT if there's any IT/software component
+CLASSIFICATION CONFIDENCE:
+- Use confidence >= 0.50 for partial matches (lenient)
+- Use confidence >= 0.75 for strong matches
+- If confidence < 0.50 for all allowed categories, mark as "not_relevant"
 
 Extract ALL opportunities from the page content. For each opportunity provide:
 - document_id, event_name, document_url, event_start_date, response_due_date, last_updated
 - is_relevant (true/false), predicted_category (MUST be one of the exact values above), classification_confidence (0.0-1.0), classification_reason
 
 Respond with valid JSON:
-{
+{{
   "opportunities": [...],
   "total_found": N,
   "relevant_count": N,
   "page_summary": "Brief summary"
-}
+}}
 """
 
 
 class AIClassifierService:
     """Service for AI-powered RFP classification using Azure OpenAI."""
 
-    def __init__(self):
+    def __init__(self, selected_categories: list[str] | None = None):
+        """
+        Initialize the AI classifier service.
+
+        Args:
+            selected_categories: List of category keys to filter by (e.g., ["ai", "dynamics_365"]).
+                                If None, uses all categories.
+        """
         settings = get_settings()
         self.client = AzureOpenAI(
             azure_endpoint=settings.azure_openai_endpoint,
@@ -182,6 +232,8 @@ class AIClassifierService:
             api_version=settings.azure_openai_api_version,
         )
         self.deployment = settings.azure_openai_deployment
+        self.selected_categories = selected_categories
+        logger.info(f"AIClassifierService initialized with categories: {selected_categories or 'ALL'}")
 
     def _log_step(self, step_num: int, step_name: str, status: str,
                   duration: float = None, metrics: dict = None):
@@ -332,10 +384,13 @@ class AIClassifierService:
     )
     def _classify_chunk(self, content: str, url: str, chunk_num: int = 1,
                         total_chunks: int = 1) -> list[dict]:
-        """Classify a single chunk of content."""
-        chunk_prompt = STAGE1_SYSTEM_PROMPT
+        """Classify a single chunk of content using dynamically built prompt."""
+        # Build prompt with selected categories
+        chunk_prompt = build_stage1_prompt(self.selected_categories)
         if total_chunks > 1:
             chunk_prompt += f"\n\nNOTE: This is chunk {chunk_num} of {total_chunks}. Extract all opportunities from this chunk."
+
+        logger.info(f"Classifying with categories: {self.selected_categories or 'ALL'}")
 
         est_tokens = self._estimate_tokens(content)
         self._log_step(8, "Azure OpenAI API Call", "started",

@@ -1,5 +1,5 @@
-import { ExternalLink, Eye } from 'lucide-react';
-import { formatDistanceToNow, parseISO, isPast } from 'date-fns';
+import { ExternalLink } from 'lucide-react';
+import { formatDistanceToNow, parseISO, isPast, differenceInHours } from 'date-fns';
 import type { Opportunity } from '../../types';
 
 interface OpportunitiesTableProps {
@@ -33,19 +33,6 @@ function formatCategoryLabel(category: string | null): string {
   return labels[category.toLowerCase()] || category;
 }
 
-function getStatusBadge(status: string): { color: string; label: string } {
-  const statusConfig: Record<string, { color: string; label: string }> = {
-    new: { color: 'bg-blue-100 text-blue-700', label: 'New' },
-    reviewing: { color: 'bg-yellow-100 text-yellow-700', label: 'Reviewing' },
-    qualified: { color: 'bg-green-100 text-green-700', label: 'Qualified' },
-    applied: { color: 'bg-emerald-100 text-emerald-700', label: 'Submitted' },
-    rejected: { color: 'bg-red-100 text-red-700', label: 'Rejected' },
-    expired: { color: 'bg-gray-100 text-gray-500', label: 'Expired' },
-    archived: { color: 'bg-gray-100 text-gray-500', label: 'Archived' },
-  };
-  return statusConfig[status] || { color: 'bg-gray-100 text-gray-700', label: status };
-}
-
 function formatDeadline(deadline: string | null): { text: string; urgent: boolean } {
   if (!deadline) return { text: 'No deadline', urgent: false };
   try {
@@ -67,12 +54,14 @@ function formatPostedDate(date: string | null): string {
   }
 }
 
-function getUrlHostname(url: string | null | undefined): string {
-  if (!url) return 'Link';
+function isNewOpportunity(opp: Opportunity): boolean {
+  if (!opp.created_at) return false;
   try {
-    return new URL(url).hostname;
+    const createdAt = parseISO(opp.created_at);
+    const hoursAgo = differenceInHours(new Date(), createdAt);
+    return hoursAgo < 24;
   } catch {
-    return 'Link';
+    return false;
   }
 }
 
@@ -85,8 +74,6 @@ function TableSkeleton() {
           <div className="w-20 h-6 bg-gray-200 dark:bg-gray-700 rounded-full" />
           <div className="w-24 h-4 bg-gray-200 dark:bg-gray-700 rounded" />
           <div className="w-16 h-4 bg-gray-200 dark:bg-gray-700 rounded" />
-          <div className="w-20 h-6 bg-gray-200 dark:bg-gray-700 rounded-full" />
-          <div className="w-8 h-8 bg-gray-200 dark:bg-gray-700 rounded" />
         </div>
       ))}
     </div>
@@ -105,11 +92,8 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
   if (loading) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Opportunities</h2>
-          <button className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg">
-            View All
-          </button>
         </div>
         <div className="p-6"><TableSkeleton /></div>
       </div>
@@ -118,11 +102,8 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Opportunities</h2>
-        <button className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg">
-          View All
-        </button>
       </div>
 
       {opportunities.length === 0 ? (
@@ -130,61 +111,79 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
           <p className="text-gray-500 dark:text-gray-400">No opportunities found</p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-700">
+        <div className="overflow-x-auto max-h-[400px] overflow-y-auto dark-scrollbar">
+          <table className="w-full table-fixed">
+            <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Website URL</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                <th className="w-[35%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
+                <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
+                <th className="w-[25%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">RFP URL</th>
+                <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
+                <th className="w-[10%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {opportunities.map((opp) => {
                 const deadline = formatDeadline(opp.submission_deadline);
-                const status = getStatusBadge(opp.status);
                 const primaryCategory = getPrimaryCategory(opp);
+                const isNew = isNewOpportunity(opp);
                 return (
-                  <tr key={opp.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-6 py-4">
-                      <div className="max-w-xs">
-                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{opp.title}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{formatPostedDate(opp.published_date)}</p>
+                  <tr
+                    key={opp.id}
+                    className={`hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                      isNew ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-400' : ''
+                    }`}
+                  >
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate" title={opp.title}>{opp.title}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{formatPostedDate(opp.published_date)}</p>
+                        </div>
+                        {isNew && (
+                          <span className="flex-shrink-0 inline-flex items-center px-2 py-0.5 text-xs font-medium bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200 rounded-full">
+                            New
+                          </span>
+                        )}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${getCategoryColor(primaryCategory)}`}>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full whitespace-nowrap ${getCategoryColor(primaryCategory)}`}>
                         {formatCategoryLabel(primaryCategory)}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       {opp.source_url ? (
                         <a href={opp.source_url} target="_blank" rel="noopener noreferrer"
-                           className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
-                          <ExternalLink className="w-4 h-4" />
-                          <span className="truncate max-w-[100px]">{getUrlHostname(opp.source_url)}</span>
+                           className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 max-w-full"
+                           title={opp.source_url}>
+                          <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                          <span className="truncate">{opp.source_url}</span>
                         </a>
                       ) : (
                         <span className="text-sm text-gray-400">N/A</span>
                       )}
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`text-sm ${deadline.urgent ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300'}`}>
+                    <td className="px-4 py-4">
+                      <span className={`text-sm whitespace-nowrap ${deadline.urgent ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300'}`}>
                         {deadline.text}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${status.color}`}>
-                        {status.label}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg">
-                        <Eye className="w-4 h-4" />
-                      </button>
+                    <td className="px-4 py-4">
+                      {opp.source_url ? (
+                        <a
+                          href={opp.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                          title="Open RFP in new tab"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                          View
+                        </a>
+                      ) : (
+                        <span className="text-sm text-gray-400">-</span>
+                      )}
                     </td>
                   </tr>
                 );

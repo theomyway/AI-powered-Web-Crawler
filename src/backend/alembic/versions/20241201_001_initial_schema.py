@@ -19,22 +19,73 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create ENUM types
-    op.execute("CREATE TYPE sourcetype AS ENUM ('government_portal', 'press_release', 'corporate_website', 'rss_feed', 'api')")
-    op.execute("CREATE TYPE sourcestatus AS ENUM ('active', 'inactive', 'error', 'maintenance')")
-    op.execute("CREATE TYPE opportunitystatus AS ENUM ('new', 'reviewing', 'qualified', 'not_relevant', 'applied', 'won', 'lost', 'expired', 'archived')")
-    op.execute("CREATE TYPE opportunitycategory AS ENUM ('dynamics', 'ai', 'iot', 'erp', 'staff_augmentation', 'cloud', 'data_analytics', 'cybersecurity', 'other')")
-    op.execute("CREATE TYPE crawlsessionstatus AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled')")
-    op.execute("CREATE TYPE documenttype AS ENUM ('rfp', 'rfq', 'rfi', 'amendment', 'attachment', 'specification', 'contract', 'other')")
-    op.execute("CREATE TYPE processingstatus AS ENUM ('pending', 'downloading', 'downloaded', 'processing', 'completed', 'failed')")
+    # Create ENUM types using DO blocks with exception handling for IF NOT EXISTS behavior
+    # This prevents errors when types already exist (PostgreSQL doesn't support IF NOT EXISTS for CREATE TYPE)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE sourcetype AS ENUM ('government_portal', 'press_release', 'corporate_website', 'rss_feed', 'api');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE sourcestatus AS ENUM ('active', 'inactive', 'error', 'maintenance');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE opportunitystatus AS ENUM ('new', 'reviewing', 'qualified', 'not_relevant', 'applied', 'won', 'lost', 'expired', 'archived');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE opportunitycategory AS ENUM ('dynamics_365', 'ai', 'iot', 'erp', 'staff_augmentation', 'other_it');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE crawlsessionstatus AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE documenttype AS ENUM ('rfp', 'rfq', 'rfi', 'amendment', 'attachment', 'specification', 'contract', 'other');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE processingstatus AS ENUM ('pending', 'downloading', 'downloaded', 'processing', 'completed', 'failed');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+
+    # Define enum types that reference existing DB types (created above)
+    sourcetype_enum = postgresql.ENUM('government_portal', 'press_release', 'corporate_website', 'rss_feed', 'api', name='sourcetype', create_type=False)
+    sourcestatus_enum = postgresql.ENUM('active', 'inactive', 'error', 'maintenance', name='sourcestatus', create_type=False)
+    opportunitystatus_enum = postgresql.ENUM('new', 'reviewing', 'qualified', 'not_relevant', 'applied', 'won', 'lost', 'expired', 'archived', name='opportunitystatus', create_type=False)
+    crawlsessionstatus_enum = postgresql.ENUM('pending', 'running', 'completed', 'failed', 'cancelled', name='crawlsessionstatus', create_type=False)
+    documenttype_enum = postgresql.ENUM('rfp', 'rfq', 'rfi', 'amendment', 'attachment', 'specification', 'contract', 'other', name='documenttype', create_type=False)
+    processingstatus_enum = postgresql.ENUM('pending', 'downloading', 'downloaded', 'processing', 'completed', 'failed', name='processingstatus', create_type=False)
 
     # Create crawl_sources table
     op.create_table(
         'crawl_sources',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
         sa.Column('name', sa.String(255), nullable=False),
-        sa.Column('source_type', sa.Enum('government_portal', 'press_release', 'corporate_website', 'rss_feed', 'api', name='sourcetype', create_type=False), nullable=False),
-        sa.Column('status', sa.Enum('active', 'inactive', 'error', 'maintenance', name='sourcestatus', create_type=False), nullable=False, server_default='active'),
+        sa.Column('source_type', sourcetype_enum, nullable=False),
+        sa.Column('status', sourcestatus_enum, nullable=False, server_default='active'),
         sa.Column('state_code', sa.String(2), nullable=False),
         sa.Column('county', sa.String(100), nullable=True),
         sa.Column('region', sa.String(100), nullable=True),
@@ -75,7 +126,7 @@ def upgrade() -> None:
         sa.Column('department', sa.String(255), nullable=True),
         sa.Column('categories', postgresql.ARRAY(sa.String), nullable=False, server_default='{}'),
         sa.Column('relevance_score', sa.Numeric(3, 2), nullable=True),
-        sa.Column('status', sa.Enum('new', 'reviewing', 'qualified', 'not_relevant', 'applied', 'won', 'lost', 'expired', 'archived', name='opportunitystatus', create_type=False), nullable=False, server_default='new'),
+        sa.Column('status', opportunitystatus_enum, nullable=False, server_default='new'),
         sa.Column('published_date', sa.DateTime(timezone=True), nullable=True),
         sa.Column('submission_deadline', sa.DateTime(timezone=True), nullable=True),
         sa.Column('estimated_value', sa.Numeric(15, 2), nullable=True),
@@ -105,7 +156,7 @@ def upgrade() -> None:
         'crawl_sessions',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
         sa.Column('source_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('crawl_sources.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('status', sa.Enum('pending', 'running', 'completed', 'failed', 'cancelled', name='crawlsessionstatus', create_type=False), nullable=False, server_default='pending'),
+        sa.Column('status', crawlsessionstatus_enum, nullable=False, server_default='pending'),
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('pages_crawled', sa.Integer, nullable=False, server_default='0'),
@@ -132,7 +183,7 @@ def upgrade() -> None:
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
         sa.Column('opportunity_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('opportunities.id', ondelete='CASCADE'), nullable=False),
         sa.Column('name', sa.String(255), nullable=False),
-        sa.Column('document_type', sa.Enum('rfp', 'rfq', 'rfi', 'amendment', 'attachment', 'specification', 'contract', 'other', name='documenttype', create_type=False), nullable=False, server_default='other'),
+        sa.Column('document_type', documenttype_enum, nullable=False, server_default='other'),
         sa.Column('source_url', sa.String(1000), nullable=False),
         sa.Column('storage_path', sa.String(500), nullable=True),
         sa.Column('sharepoint_item_id', sa.String(100), nullable=True),
@@ -140,7 +191,7 @@ def upgrade() -> None:
         sa.Column('mime_type', sa.String(100), nullable=True),
         sa.Column('file_size_bytes', sa.BigInteger, nullable=True),
         sa.Column('checksum', sa.String(64), nullable=True),
-        sa.Column('processing_status', sa.Enum('pending', 'downloading', 'downloaded', 'processing', 'completed', 'failed', name='processingstatus', create_type=False), nullable=False, server_default='pending'),
+        sa.Column('processing_status', processingstatus_enum, nullable=False, server_default='pending'),
         sa.Column('processing_error', sa.Text, nullable=True),
         sa.Column('extracted_text', sa.Text, nullable=True),
         sa.Column('ai_summary', sa.Text, nullable=True),

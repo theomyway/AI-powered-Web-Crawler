@@ -161,17 +161,12 @@ def save_opportunities_to_db(results: list[dict], crawl_session_id: str) -> int:
                     
                     try:
                         doc_id = opp.get("document_id")
-                        
-                        # Check for duplicates
-                        if doc_id:
-                            cur.execute(
-                                "SELECT id FROM opportunities WHERE source_opportunity_id = %s",
-                                (doc_id,)
-                            )
-                            if cur.fetchone():
-                                logger.info(f"Skipping duplicate: {doc_id}")
-                                continue
-                        
+
+                        # Skip if no document ID (can't deduplicate without it)
+                        if not doc_id:
+                            logger.warning("Skipping opportunity without document_id")
+                            continue
+
                         # Get or create source
                         domain = urlparse(url).netloc or "unknown"
                         if domain not in source_cache:
@@ -206,7 +201,8 @@ def save_opportunities_to_db(results: list[dict], crawl_session_id: str) -> int:
                         if not isinstance(certifications, list):
                             certifications = []
 
-                        # Insert opportunity with all Stage 2 enrichment data
+                        # UPSERT: Insert new or update existing opportunity
+                        # Uses ON CONFLICT on source_opportunity_id to handle duplicates gracefully
                         opp_id = uuid.uuid4()
                         cur.execute(
                             """
@@ -227,12 +223,30 @@ def save_opportunities_to_db(results: list[dict], crawl_session_id: str) -> int:
                                 %s, %s,
                                 %s, %s
                             )
+                            ON CONFLICT (source_opportunity_id) DO UPDATE SET
+                                title = EXCLUDED.title,
+                                source_url = EXCLUDED.source_url,
+                                categories = EXCLUDED.categories,
+                                relevance_score = EXCLUDED.relevance_score,
+                                submission_deadline = EXCLUDED.submission_deadline,
+                                published_date = EXCLUDED.published_date,
+                                ai_analysis = EXCLUDED.ai_analysis,
+                                requires_prequalification = EXCLUDED.requires_prequalification,
+                                prequalification_deadline = EXCLUDED.prequalification_deadline,
+                                is_discretionary = EXCLUDED.is_discretionary,
+                                estimated_value = EXCLUDED.estimated_value,
+                                eligibility_requirements = EXCLUDED.eligibility_requirements,
+                                certifications_required = EXCLUDED.certifications_required,
+                                contact_info = EXCLUDED.contact_info,
+                                updated_at = EXCLUDED.updated_at
+                            RETURNING (xmax = 0) AS is_insert
                             """,
                             (
                                 str(opp_id),
                                 str(source_id),
                                 doc_id,
-                                url,
+                                # Use document_url (RFP-specific URL) if available, otherwise fall back to base URL
+                                opp.get("document_url") or url,
                                 opp.get("event_name", "Unknown Opportunity"),
                                 "US",  # Default state code for ad-hoc scans
                                 "new",  # OpportunityStatus.NEW
@@ -252,8 +266,14 @@ def save_opportunities_to_db(results: list[dict], crawl_session_id: str) -> int:
                                 datetime.utcnow(),
                             )
                         )
-                        saved_count += 1
-                        logger.info(f"Saved opportunity: {doc_id} - {opp.get('event_name', 'Unknown')[:50]}")
+                        result = cur.fetchone()
+                        is_insert = result['is_insert'] if result else True
+
+                        if is_insert:
+                            saved_count += 1
+                            logger.info(f"Inserted new opportunity: {doc_id} - {opp.get('event_name', 'Unknown')[:50]}")
+                        else:
+                            logger.info(f"Updated existing opportunity: {doc_id} - {opp.get('event_name', 'Unknown')[:50]}")
 
                     except Exception as e:
                         logger.error(f"Failed to save opportunity {opp.get('document_id')}: {e}")

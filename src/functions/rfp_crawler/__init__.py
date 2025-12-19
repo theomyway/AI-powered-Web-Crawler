@@ -450,9 +450,11 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         state_code = req_body.get("state_code", "TN")
         source_ids = req_body.get("source_ids", [])  # Source IDs for callback
         backend_url = req_body.get("backend_url")  # Backend URL for callback
+        categories = req_body.get("categories", [])  # User-selected categories for filtering
 
         # DEBUG: Log the actual values of callback parameters
         logging.info(f"!!! CALLBACK PARAMS: backend_url={backend_url}, source_ids={source_ids}")
+        logging.info(f"!!! SELECTED CATEGORIES: {categories}")
 
         if not urls:
             return func.HttpResponse(
@@ -469,13 +471,14 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             "session_id": crawl_session_id,
             "state_code": state_code,
             "stage2_enabled": enable_stage2,
+            "categories": categories or "ALL",
             "has_source_ids": len([s for s in source_ids if s]) > 0,
             "has_backend_url": backend_url is not None
         })
 
-        # Initialize services
+        # Initialize services with selected categories for filtering
         crawler = PageCrawlerService()
-        classifier = AIClassifierService()
+        classifier = AIClassifierService(selected_categories=categories if categories else None)
         doc_processor = DocumentProcessorService(page_limit=4)  # First 4 pages for classification
 
         results = []

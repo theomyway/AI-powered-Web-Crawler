@@ -1,12 +1,10 @@
-import { Play, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { formatDistanceToNow, parseISO, differenceInMinutes } from 'date-fns';
-import type { CrawlSession, CrawlSource } from '../../types';
+import type { CrawlSession } from '../../types';
 
 interface CrawlerStatusProps {
   session: CrawlSession | null;
-  sources: CrawlSource[];
   loading: boolean;
-  onStartCrawl: () => void;
 }
 
 /**
@@ -64,11 +62,9 @@ function formatRelativeTime(dateStr: string | null): string {
   }
 }
 
-export function CrawlerStatus({ session, sources, loading, onStartCrawl }: CrawlerStatusProps) {
+export function CrawlerStatus({ session, loading }: CrawlerStatusProps) {
   const status = getStatusBadge(session);
   const lastCrawl = session?.completed_at || session?.started_at;
-  const isRunning = isSessionActive(session);
-  const firstSource = sources[0];
 
   if (loading) {
     return (
@@ -79,7 +75,6 @@ export function CrawlerStatus({ session, sources, loading, onStartCrawl }: Crawl
         </div>
         <div className="space-y-4">
           <div className="h-6 w-24 bg-gray-200 dark:bg-gray-700 rounded-full" />
-          <div className="h-10 w-full bg-gray-200 dark:bg-gray-700 rounded-lg" />
           <div className="space-y-3">
             <div className="h-4 w-full bg-gray-200 dark:bg-gray-700 rounded" />
             <div className="h-4 w-full bg-gray-200 dark:bg-gray-700 rounded" />
@@ -105,20 +100,6 @@ export function CrawlerStatus({ session, sources, loading, onStartCrawl }: Crawl
           </span>
         </div>
 
-        {/* Start Crawl Button */}
-        <button
-          onClick={onStartCrawl}
-          disabled={isRunning || !firstSource}
-          className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-            isRunning || !firstSource
-              ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
-          }`}
-        >
-          <Play className="w-4 h-4" />
-          {isRunning ? 'Crawling...' : 'Start Crawl'}
-        </button>
-
         {/* Info Rows */}
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between text-sm">
@@ -127,14 +108,14 @@ export function CrawlerStatus({ session, sources, loading, onStartCrawl }: Crawl
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-500 dark:text-gray-400">Next Scheduled</span>
-            <span className="text-gray-900 dark:text-white font-medium">Not scheduled</span>
+            <span className="text-gray-900 dark:text-white font-medium">N/A</span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-500 dark:text-gray-400">Opportunities Found (Last Run)</span>
+            <span className="text-2xl font-bold text-gray-900 dark:text-white">
+              {session?.opportunities_found ?? 0}
+            </span>
           </div>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white">
-            {session?.opportunities_found ?? 0}
-          </p>
         </div>
       </div>
     </div>

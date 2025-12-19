@@ -21,19 +21,6 @@ const CATEGORIES = [
   { value: 'other_it', label: 'Other (IT related)' },
 ];
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'All Status' },
-  { value: 'new', label: 'New' },
-  { value: 'reviewing', label: 'Reviewing' },
-  { value: 'qualified', label: 'Qualified' },
-  { value: 'not_relevant', label: 'Not Relevant' },
-  { value: 'applied', label: 'Applied' },
-  { value: 'won', label: 'Won' },
-  { value: 'lost', label: 'Lost' },
-  { value: 'expired', label: 'Expired' },
-  { value: 'archived', label: 'Archived' },
-];
-
 // Helper functions (same as OpportunitiesTable)
 function getCategoryColor(category: string | null): string {
   const colors: Record<string, string> = {
@@ -60,18 +47,6 @@ function formatCategoryLabel(category: string | null): string {
   return labels[category.toLowerCase()] || category;
 }
 
-function getStatusBadge(status: string): { color: string; label: string } {
-  const config: Record<string, { color: string; label: string }> = {
-    new: { color: 'bg-blue-100 text-blue-700', label: 'New' },
-    reviewing: { color: 'bg-yellow-100 text-yellow-700', label: 'Reviewing' },
-    qualified: { color: 'bg-green-100 text-green-700', label: 'Qualified' },
-    applied: { color: 'bg-emerald-100 text-emerald-700', label: 'Submitted' },
-    rejected: { color: 'bg-red-100 text-red-700', label: 'Rejected' },
-    expired: { color: 'bg-gray-100 text-gray-500', label: 'Expired' },
-  };
-  return config[status] || { color: 'bg-gray-100 text-gray-700', label: status };
-}
-
 function formatDeadline(deadline: string | null): { text: string; urgent: boolean } {
   if (!deadline) return { text: 'No deadline', urgent: false };
   try {
@@ -90,15 +65,6 @@ function formatPostedDate(date: string | null): string {
     return `Posted ${formatDistanceToNow(parseISO(date), { addSuffix: true })}`;
   } catch {
     return '';
-  }
-}
-
-function getUrlHostname(url: string | null | undefined): string {
-  if (!url) return 'Link';
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return 'Link';
   }
 }
 
@@ -282,7 +248,6 @@ export function RfpScanner() {
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
   const [prequalRequired, setPrequalRequired] = useState(false);
 
   // Data state
@@ -302,7 +267,6 @@ export function RfpScanner() {
       };
       if (searchQuery) params.search = searchQuery;
       if (categoryFilter) params.categories = [categoryFilter];
-      if (statusFilter) params.status = [statusFilter];
       if (prequalRequired) params.requires_prequalification = true;
 
       const response = await opportunitiesApi.listWithFilters(params);
@@ -313,7 +277,7 @@ export function RfpScanner() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchQuery, categoryFilter, statusFilter, prequalRequired]);
+  }, [page, searchQuery, categoryFilter, prequalRequired]);
 
   // Fetch sources for status updates
   const fetchSources = useCallback(async () => {
@@ -668,10 +632,25 @@ export function RfpScanner() {
               : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
           }`}
         >
-          <div className="flex items-center gap-2">
-            {scanMessage.type === 'success' && <CheckCircle className="w-5 h-5" />}
-            {scanMessage.type === 'error' && <AlertCircle className="w-5 h-5" />}
-            <p className="text-sm">{scanMessage.text}</p>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {scanMessage.type === 'success' && <CheckCircle className="w-5 h-5" />}
+              {scanMessage.type === 'error' && <AlertCircle className="w-5 h-5" />}
+              <p className="text-sm">{scanMessage.text}</p>
+            </div>
+            <button
+              onClick={() => setScanMessage(null)}
+              className={`p-1 rounded transition-colors ${
+                scanMessage.type === 'error'
+                  ? 'hover:bg-red-100 dark:hover:bg-red-800'
+                  : scanMessage.type === 'success'
+                  ? 'hover:bg-green-100 dark:hover:bg-green-800'
+                  : 'hover:bg-blue-100 dark:hover:bg-blue-800'
+              }`}
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}
@@ -877,20 +856,6 @@ export function RfpScanner() {
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
 
-            {/* Status Filter */}
-            <div className="relative">
-              <select
-                value={statusFilter}
-                onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
-                className="appearance-none pl-4 pr-10 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white cursor-pointer"
-              >
-                {STATUS_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-            </div>
-
             {/* Pre-qual Toggle */}
             <label className="flex items-center gap-2 cursor-pointer">
               <div
@@ -937,21 +902,19 @@ export function RfpScanner() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full table-fixed">
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Website URL</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                  <th className="w-[35%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
+                  <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
+                  <th className="w-[25%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">RFP URL</th>
+                  <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
+                  <th className="w-[10%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                 {opportunities.map(opp => {
                   const deadline = formatDeadline(opp.submission_deadline);
-                  const status = getStatusBadge(opp.status);
                   const primaryCategory = getPrimaryCategory(opp);
                   const isNew = isNewOpportunity(opp);
                   return (
@@ -961,49 +924,56 @@ export function RfpScanner() {
                         isNew ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-400' : ''
                       }`}
                     >
-                      <td className="px-6 py-4">
-                        <div className="max-w-xs flex items-center gap-2">
-                          <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{opp.title}</p>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate" title={opp.title}>{opp.title}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400">{formatPostedDate(opp.published_date)}</p>
                           </div>
                           {isNew && (
-                            <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200 rounded-full">
+                            <span className="flex-shrink-0 inline-flex items-center px-2 py-0.5 text-xs font-medium bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200 rounded-full">
                               New
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${getCategoryColor(primaryCategory)}`}>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full whitespace-nowrap ${getCategoryColor(primaryCategory)}`}>
                           {formatCategoryLabel(primaryCategory)}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4">
                         {opp.source_url ? (
                           <a href={opp.source_url} target="_blank" rel="noopener noreferrer"
-                             className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
-                            <ExternalLink className="w-4 h-4" />
-                            <span className="truncate max-w-[100px]">{getUrlHostname(opp.source_url)}</span>
+                             className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 max-w-full"
+                             title={opp.source_url}>
+                            <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                            <span className="truncate">{opp.source_url}</span>
                           </a>
                         ) : (
                           <span className="text-sm text-gray-400">N/A</span>
                         )}
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`text-sm ${deadline.urgent ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300'}`}>
+                      <td className="px-4 py-4">
+                        <span className={`text-sm whitespace-nowrap ${deadline.urgent ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300'}`}>
                           {deadline.text}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${status.color}`}>
-                          {status.label}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg">
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
+                      <td className="px-4 py-4">
+                        {opp.source_url ? (
+                          <a
+                            href={opp.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                            title="Open RFP in new tab"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                            View
+                          </a>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
                       </td>
                     </tr>
                   );

@@ -342,7 +342,11 @@ async def _save_opportunities_to_db(
     results: list[dict],
     crawl_session_id: str,
 ) -> int:
-    """Save extracted opportunities to the database."""
+    """Save extracted opportunities to the database using UPSERT logic.
+
+    Uses source_opportunity_id as the unique key for deduplication.
+    Existing opportunities are updated with new data, new ones are inserted.
+    """
     saved_count = 0
 
     for result in results:
@@ -353,43 +357,102 @@ async def _save_opportunities_to_db(
             if not opp.get("is_relevant"):
                 continue
 
+            doc_id = opp.get("document_id")
+            if not doc_id:
+                logger.warning("Skipping opportunity without document_id")
+                continue
+
             try:
                 # Check if opportunity already exists
-                existing = await db.execute(
+                existing_result = await db.execute(
                     select(Opportunity).where(
-                        Opportunity.external_id == opp.get("document_id")
+                        Opportunity.source_opportunity_id == doc_id
                     )
                 )
+                existing_opp = existing_result.scalar_one_or_none()
 
-                if existing.scalar_one_or_none():
-                    continue  # Skip duplicates
+                ai_analysis = {
+                    "stage1_category": opp.get("predicted_category"),
+                    "classification_reason": opp.get("classification_reason"),
+                    "crawl_session_id": crawl_session_id,
+                }
 
-                # Create new opportunity
-                new_opp = Opportunity(
-                    external_id=opp.get("document_id"),
-                    title=opp.get("event_name", "Unknown"),
-                    source_url=result.get("url"),
-                    status=OpportunityStatus.NEW,
-                    categories=[opp.get("predicted_category", "other")],
-                    relevance_score=opp.get("classification_confidence"),
-                    due_date=_parse_date(opp.get("response_due_date")),
-                    ai_analysis={
-                        "stage1_category": opp.get("predicted_category"),
-                        "classification_reason": opp.get("classification_reason"),
-                        "crawl_session_id": crawl_session_id,
-                    }
-                )
-                db.add(new_opp)
-                saved_count += 1
+                # Use document_url (RFP-specific URL) if available, otherwise fall back to base URL
+                rfp_url = opp.get("document_url") or result.get("url")
+                base_url = result.get("url", "")
+
+                if existing_opp:
+                    # Update existing opportunity
+                    existing_opp.title = opp.get("event_name", "Unknown")
+                    existing_opp.source_url = rfp_url
+                    existing_opp.categories = [opp.get("predicted_category", "other")]
+                    existing_opp.relevance_score = opp.get("classification_confidence")
+                    existing_opp.submission_deadline = _parse_date(opp.get("response_due_date"))
+                    existing_opp.ai_analysis = ai_analysis
+                    logger.info(f"Updated existing opportunity: {doc_id}")
+                else:
+                    # Create new opportunity - need a source_id
+                    # Get or create an ad-hoc source for this URL
+                    source = await _get_or_create_adhoc_source(db, base_url)
+
+                    new_opp = Opportunity(
+                        source_id=source.id,
+                        source_opportunity_id=doc_id,
+                        title=opp.get("event_name", "Unknown"),
+                        source_url=rfp_url,
+                        state_code="US",
+                        status=OpportunityStatus.NEW,
+                        categories=[opp.get("predicted_category", "other")],
+                        relevance_score=opp.get("classification_confidence"),
+                        submission_deadline=_parse_date(opp.get("response_due_date")),
+                        ai_analysis=ai_analysis,
+                    )
+                    db.add(new_opp)
+                    saved_count += 1
+                    logger.info(f"Inserted new opportunity: {doc_id}")
 
             except Exception as e:
-                logger.warning(f"Failed to save opportunity: {e}")
+                logger.warning(f"Failed to save opportunity {doc_id}: {e}")
                 continue
 
     if saved_count > 0:
         await db.commit()
 
     return saved_count
+
+
+async def _get_or_create_adhoc_source(db: AsyncSession, url: str) -> CrawlSource:
+    """Get or create an ad-hoc crawl source for URL-based scanning."""
+    from urllib.parse import urlparse
+    from app.models.crawl_source import SourceType
+
+    parsed = urlparse(url)
+    domain = parsed.netloc or "unknown"
+    source_name = f"Ad-hoc: {domain}"
+
+    # Check if source already exists
+    result = await db.execute(
+        select(CrawlSource).where(CrawlSource.name == source_name)
+    )
+    source = result.scalar_one_or_none()
+
+    if source:
+        return source
+
+    # Create new source
+    new_source = CrawlSource(
+        name=source_name,
+        source_type=SourceType.GOVERNMENT_PORTAL,
+        state_code="US",
+        base_url=f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme else url,
+        config={"selectors": {}, "pagination": {"type": "none"}},
+        is_enabled=True,
+        notes="Auto-created source for ad-hoc URL scanning",
+    )
+    db.add(new_source)
+    await db.flush()
+
+    return new_source
 
 
 def _parse_date(date_str: str | None) -> datetime | None:

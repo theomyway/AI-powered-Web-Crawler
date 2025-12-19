@@ -1,12 +1,10 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Scan, BarChart3, FileText, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Scan, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard, enabled: true },
-  { name: 'RFP Scanner', href: '/scanner', icon: Scan, enabled: true },
-  { name: 'RFP Generator', href: '/generator', icon: FileText, enabled: false },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3, enabled: false },
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'RFP Scanner', href: '/scanner', icon: Scan },
 ];
 
 export function Sidebar() {
@@ -27,23 +25,17 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        <p className="px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-          Navigation
-        </p>
         {navigation.map((item) => (
           <NavLink
             key={item.name}
-            to={item.enabled ? item.href : '#'}
+            to={item.href}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                !item.enabled
-                  ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
-                  : isActive
+                isActive
                   ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
               }`
             }
-            onClick={(e) => !item.enabled && e.preventDefault()}
           >
             <item.icon className="w-5 h-5" />
             {item.name}

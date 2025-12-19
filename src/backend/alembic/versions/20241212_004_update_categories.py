@@ -21,44 +21,43 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # PostgreSQL enum types cannot be modified directly, so we need to:
-    # 1. Add new enum values
-    # 2. Update existing data to use new values
-    # 3. Remove old enum values
-    
-    # Add new enum values first
+    # For fresh databases, the initial migration already creates opportunitycategory
+    # with the new values (dynamics_365, other_it). This migration handles upgrades
+    # from older databases that had the old category values.
+
+    # Add new enum values if they don't exist (safe for fresh and existing DBs)
     op.execute("ALTER TYPE opportunitycategory ADD VALUE IF NOT EXISTS 'dynamics_365'")
     op.execute("ALTER TYPE opportunitycategory ADD VALUE IF NOT EXISTS 'other_it'")
-    
+
     # Commit the enum changes (required before using new values)
     op.execute("COMMIT")
-    
-    # Update existing data to use new category values
+
+    # Update existing data to use new category values (no-op if data doesn't exist)
     # Map 'dynamics' to 'dynamics_365'
     op.execute("""
-        UPDATE opportunities 
+        UPDATE opportunities
         SET categories = array_replace(categories, 'dynamics', 'dynamics_365')
         WHERE 'dynamics' = ANY(categories)
     """)
-    
+
     # Map 'cloud', 'cybersecurity', 'data_analytics', 'other' to 'other_it'
     op.execute("""
-        UPDATE opportunities 
+        UPDATE opportunities
         SET categories = array_replace(categories, 'cloud', 'other_it')
         WHERE 'cloud' = ANY(categories)
     """)
     op.execute("""
-        UPDATE opportunities 
+        UPDATE opportunities
         SET categories = array_replace(categories, 'cybersecurity', 'other_it')
         WHERE 'cybersecurity' = ANY(categories)
     """)
     op.execute("""
-        UPDATE opportunities 
+        UPDATE opportunities
         SET categories = array_replace(categories, 'data_analytics', 'other_it')
         WHERE 'data_analytics' = ANY(categories)
     """)
     op.execute("""
-        UPDATE opportunities 
+        UPDATE opportunities
         SET categories = array_replace(categories, 'other', 'other_it')
         WHERE 'other' = ANY(categories)
     """)

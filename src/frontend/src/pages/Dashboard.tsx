@@ -1,16 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Info, RefreshCw, Search, ArrowRight } from 'lucide-react';
+import { Info, RefreshCw, Search, ArrowRight, X } from 'lucide-react';
 import { StatsCards, OpportunitiesTable, CrawlerStatus } from '../components/dashboard';
 import { dashboardApi, opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
-import type { DashboardStats, Opportunity, CrawlSession, CrawlSource } from '../types';
+import type { DashboardStats, Opportunity, CrawlSession } from '../types';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [latestSession, setLatestSession] = useState<CrawlSession | null>(null);
-  const [sources, setSources] = useState<CrawlSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -21,17 +20,62 @@ export function Dashboard() {
       else setLoading(true);
       setError(null);
 
-      const [statsData, oppsData, sessionsData, sourcesData] = await Promise.all([
+      const [statsData, oppsData, sessionsData, sources] = await Promise.all([
         dashboardApi.getStats(),
-        opportunitiesApi.list(1, 10),
-        crawlApi.getSessions(1, 1),
-        sourcesApi.list(1, 100),
+        opportunitiesApi.list(1, 20),  // Fetch more opportunities for scrollable table
+        crawlApi.getSessions(1, 10),   // Fetch sessions
+        sourcesApi.getAll(),           // Fetch sources for scan data
       ]);
 
       setStats(statsData);
       setOpportunities(oppsData.items);
-      setLatestSession(sessionsData.items[0] || null);
-      setSources(sourcesData.items);
+
+      // Find the most recent session with meaningful data
+      const sessions = sessionsData.items;
+      const completedWithOpps = sessions.find(s => s.status === 'completed' && s.opportunities_found > 0);
+      const completedSession = sessions.find(s => s.status === 'completed' && s.started_at);
+      const anySessionWithData = sessions.find(s => s.started_at || s.completed_at);
+
+      // Also check sources for the most recent scan (from RFP Scanner)
+      const successSources = sources.filter(s => s.last_crawl_completed_at);
+      const mostRecentSource = successSources.sort((a, b) =>
+        new Date(b.last_crawl_completed_at!).getTime() - new Date(a.last_crawl_completed_at!).getTime()
+      )[0];
+
+      // Find the most recent scan start time to count opportunities from that run only
+      const lastScanStartTime = mostRecentSource?.last_crawl_started_at
+        ? new Date(mostRecentSource.last_crawl_started_at)
+        : null;
+
+      // Count opportunities created during/after the last scan (this gives us "last run" count)
+      const lastRunOpportunities = lastScanStartTime
+        ? oppsData.items.filter(o => new Date(o.created_at) >= lastScanStartTime).length
+        : 0;
+
+      // Create a synthetic session from source data if no real session found
+      if (completedWithOpps) {
+        setLatestSession(completedWithOpps);
+      } else if (completedSession) {
+        setLatestSession(completedSession);
+      } else if (mostRecentSource && mostRecentSource.last_crawl_completed_at) {
+        // Create synthetic session from source data
+        setLatestSession({
+          id: 'source-derived',
+          source_id: mostRecentSource.id,
+          status: 'completed',
+          started_at: mostRecentSource.last_crawl_started_at,
+          completed_at: mostRecentSource.last_crawl_completed_at,
+          opportunities_found: lastRunOpportunities,
+          opportunities_new: 0,
+          opportunities_updated: 0,
+          pages_crawled: successSources.length,
+          errors_count: 0,
+          last_error_message: null,
+          created_at: mostRecentSource.last_crawl_completed_at,
+        });
+      } else {
+        setLatestSession(anySessionWithData || sessions[0] || null);
+      }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
       setError('Failed to load dashboard data. Please check if the backend is running.');
@@ -47,16 +91,6 @@ export function Dashboard() {
     const interval = setInterval(() => fetchData(true), 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
-
-  const handleStartCrawl = async () => {
-    if (sources.length === 0) return;
-    try {
-      await crawlApi.triggerCrawl(sources[0].id);
-      fetchData(true);
-    } catch (err) {
-      console.error('Failed to trigger crawl:', err);
-    }
-  };
 
   return (
     <div className="space-y-8">
@@ -82,12 +116,19 @@ export function Dashboard() {
       {error && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 flex items-start gap-3">
           <Info className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <div>
+          <div className="flex-1">
             <p className="text-sm font-medium text-red-800 dark:text-red-300">{error}</p>
             <p className="text-sm text-red-600 dark:text-red-400 mt-1">
               Make sure the backend server is running at http://127.0.0.1:8000
             </p>
           </div>
+          <button
+            onClick={() => setError(null)}
+            className="p-1 text-red-500 hover:text-red-700 dark:hover:text-red-300 hover:bg-red-100 dark:hover:bg-red-800 rounded transition-colors"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -95,7 +136,7 @@ export function Dashboard() {
       {!error && opportunities.length === 0 && !loading && (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex items-start gap-3">
           <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-blue-700 dark:text-blue-300">
+          <p className="text-sm text-blue-700 dark:text-blue-300 flex-1">
             No opportunities found matching your configured categories. Sources checked: SAM.gov Federal API,
             Web scraping. Try adding a SAM.gov API key in Settings for more opportunities.
           </p>
@@ -137,9 +178,7 @@ export function Dashboard() {
         <div className="lg:col-span-1">
           <CrawlerStatus
             session={latestSession}
-            sources={sources}
             loading={loading}
-            onStartCrawl={handleStartCrawl}
           />
         </div>
       </div>

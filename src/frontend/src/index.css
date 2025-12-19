@@ -13,3 +13,40 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Custom scrollbar styling for dark mode */
+.dark-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb {
+  background: #4b5563; /* gray-600 */
+  border-radius: 4px;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6b7280; /* gray-500 */
+}
+
+/* Dark mode scrollbar - apply to elements with scrollbars */
+.dark .dark-scrollbar::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+.dark .dark-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Light mode scrollbar */
+:not(.dark) .dark-scrollbar::-webkit-scrollbar-thumb {
+  background: #d1d5db; /* gray-300 */
+}
+
+:not(.dark) .dark-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af; /* gray-400 */
+}

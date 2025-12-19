@@ -134,5 +134,6 @@ async def health_check() -> dict:
         "status": "healthy",
         "version": settings.app_version,
         "environment": settings.environment,
+        "cors_origins": settings.cors_origins,
     }
 
