@@ -722,9 +722,8 @@ export function RfpScanner() {
                         </span>
                       )}
                       {processingStatus === 'processing' && (
-                        <span title="Processing..." className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+                        <span title="Processing..." className="flex items-center text-blue-600 dark:text-blue-400">
                           <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
-                          Processing
                         </span>
                       )}
                       {processingStatus === 'success' && (

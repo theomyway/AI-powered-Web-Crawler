@@ -251,21 +251,33 @@ class AIClassifierService:
         """Estimate token count for text."""
         return len(text) // CHARS_PER_TOKEN
 
-    def _extract_rfp_table_content(self, html_content: str) -> str:
+    def _extract_rfp_table_content(self, html_content: str, source_url: str = None) -> str:
         """
         Extract just the RFP table content from HTML, reducing token usage.
 
         This intelligently extracts the procurement opportunities table
         rather than sending the entire HTML page to GPT-4.
+
+        Args:
+            html_content: Raw HTML from the page
+            source_url: The source URL for constructing absolute URLs from relative ones
         """
         try:
             from bs4 import BeautifulSoup
+            from urllib.parse import urlparse, urljoin
         except ImportError:
             logger.warning("BeautifulSoup not available, using raw HTML")
             return html_content
 
         step_start = time.time()
         self._log_step(7, "HTML Parsing", "started", metrics={"raw_html_chars": len(html_content)})
+
+        # Extract base URL from source_url for resolving relative links
+        base_url = ""
+        if source_url:
+            parsed = urlparse(source_url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+            logger.info(f"Using base URL for relative links: {base_url}")
 
         soup = BeautifulSoup(html_content, 'html.parser')
 
@@ -297,9 +309,12 @@ class AIClassifierService:
                         for link in links:
                             href = link.get('href', '')
                             if href and not href.startswith('#'):
-                                # Make relative URLs absolute
+                                # Make relative URLs absolute using the source URL's domain
                                 if href.startswith('/'):
-                                    href = 'https://www.tn.gov' + href
+                                    href = base_url + href if base_url else href
+                                elif not href.startswith('http'):
+                                    # Handle relative URLs without leading slash
+                                    href = urljoin(source_url, href) if source_url else href
                                 cell_text += f" [URL: {href}]"
                     row_data.append(cell_text)
                 table_content.append(' | '.join(row_data))
@@ -467,8 +482,8 @@ class AIClassifierService:
         self._log_step(6, "AI Classification", "started",
                       metrics={"url": url, "html_chars": len(html_content)})
 
-        # Extract just the RFP content from HTML
-        extracted_content = self._extract_rfp_table_content(html_content)
+        # Extract just the RFP content from HTML, passing source URL for proper link resolution
+        extracted_content = self._extract_rfp_table_content(html_content, source_url=url)
 
         est_tokens = self._estimate_tokens(extracted_content)
         self._log_step(7, "Content Extraction", "completed",
