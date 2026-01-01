@@ -25,6 +25,7 @@ from app.models.crawl_session import CrawlSession, CrawlSessionStatus
 from app.models.crawl_source import CrawlSource, ProcessingStatus, SourceStatus
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.schemas.common import PaginatedResponse, SuccessResponse
+from app.services.servicebus import get_servicebus_service
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -160,10 +161,11 @@ async def scan_urls(
             source = result.scalar_one_or_none()
 
         if source:
-            # Update processing status to 'processing'
-            source.processing_status = ProcessingStatus.PROCESSING
+            # Update processing status to 'pending' (queued for processing)
+            source.processing_status = ProcessingStatus.PENDING
             source.last_crawl_started_at = datetime.utcnow()
             source.processing_error_message = None
+            source.progress_percent = 0
             source_ids.append(str(source.id))
             logger.info(f"Found existing source for URL: {url}, source_id: {source.id}")
         else:
@@ -185,8 +187,9 @@ async def scan_urls(
                     "pagination": {"type": "link", "max_pages": 1}
                 },
                 is_enabled=True,
-                processing_status=ProcessingStatus.PROCESSING,
+                processing_status=ProcessingStatus.PENDING,
                 last_crawl_started_at=datetime.utcnow(),
+                progress_percent=0,
             )
             db.add(new_source)
             await db.flush()  # Get the ID
@@ -196,7 +199,39 @@ async def scan_urls(
     # Commit the processing status immediately so it's visible to frontend
     await db.commit()
 
-    # Try Azure Function first
+    # Try Service Bus first (preferred for sequential processing)
+    servicebus = get_servicebus_service()
+    if servicebus.is_configured:
+        logger.info(
+            "Using Service Bus for URL processing",
+            session_id=crawl_session_id,
+            url_count=len(request.urls),
+        )
+
+        # Send each URL as a separate message for sequential processing
+        success_count, fail_count = await servicebus.send_batch_crawl_requests(
+            urls=request.urls,
+            source_ids=source_ids,
+            crawl_session_id=crawl_session_id,
+            categories=request.categories or [],
+            backend_url=str(settings.backend_url),
+        )
+
+        if fail_count > 0:
+            logger.warning(
+                f"Some messages failed to queue: {fail_count} of {len(request.urls)}"
+            )
+
+        return UrlCrawlResponse(
+            success=True,
+            crawl_session_id=crawl_session_id,
+            results=[],
+            total_relevant=0,
+            saved_to_db=0,
+            message=f"Queued {success_count} URL(s) for processing. Each URL will be processed sequentially."
+        )
+
+    # Fallback: Try Azure Function HTTP trigger
     function_url = settings.azure_function_url
 
     if function_url:

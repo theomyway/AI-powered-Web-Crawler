@@ -210,27 +210,36 @@ async def update_source_processing_status(
 
     # Update processing status
     source.processing_status = data.processing_status
-    source.last_crawl_completed_at = datetime.utcnow()
 
-    # Update error message if status is failed
-    if data.processing_status == ProcessingStatus.FAILED:
+    # Handle different status transitions
+    if data.processing_status == ProcessingStatus.PROCESSING:
+        # Started processing - set start time if not already set
+        if not source.last_crawl_started_at:
+            source.last_crawl_started_at = datetime.utcnow()
+    elif data.processing_status == ProcessingStatus.FAILED:
+        # Failed - update completion time and error message
+        source.last_crawl_completed_at = datetime.utcnow()
         source.processing_error_message = data.processing_error_message
         source.last_error_message = data.processing_error_message
-    else:
-        source.processing_error_message = None
+        # Reset progress fields
+        source.progress_percent = 0
+        source.progress_message = None
+        source.current_processing_url = None
+    elif data.processing_status == ProcessingStatus.SUCCESS:
+        # Success - update completion time and success timestamp
+        source.last_crawl_completed_at = datetime.utcnow()
         source.last_success_at = datetime.utcnow()
+        source.processing_error_message = None
+        # Reset progress fields
+        source.progress_percent = 0
+        source.progress_message = None
+        source.current_processing_url = None
 
     # Update opportunities found if provided
     if data.opportunities_found is not None:
         source.total_opportunities_found = (
             source.total_opportunities_found + data.opportunities_found
         )
-
-    # Reset progress fields when crawl completes
-    if data.processing_status in (ProcessingStatus.SUCCESS, ProcessingStatus.FAILED):
-        source.progress_percent = 0
-        source.progress_message = None
-        source.current_processing_url = None
 
     await db.flush()
     await db.refresh(source)

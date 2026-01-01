@@ -5,8 +5,8 @@ import { opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
 import type { Opportunity, CrawlSource, ProcessingStatus } from '../types';
 import type { UrlCrawlResponse } from '../services/api';
 
-// Polling interval for processing status (10 seconds for responsive progress updates)
-const POLLING_INTERVAL_MS = 10 * 1000;
+// Polling interval for processing status (5 seconds for responsive progress updates)
+const POLLING_INTERVAL_MS = 5 * 1000;
 
 // Progress bar animation duration in ms
 const PROGRESS_ANIMATION_DURATION = 300;
@@ -141,17 +141,20 @@ export function RfpScanner() {
       }
     }
 
-    // If currently polling (scan in progress), show 'processing' status for URLs being scanned
-    if (isPollingActive && source.processing_status === 'processing') {
-      return 'processing';
+    // If currently polling (scan in progress), show status for URLs being scanned
+    if (isPollingActive && (source.processing_status === 'processing' || source.processing_status === 'pending')) {
+      return source.processing_status;
     }
 
     return null;
   }, [sources, normalizeUrl, lastScanStartTime, isPollingActive]);
 
-  // Check if any URL is currently processing (based on sources data)
+  // Check if any URL is currently processing or pending (based on sources data)
   const hasProcessingUrls = useCallback((): boolean => {
-    return urlList.some(url => getUrlProcessingStatus(url) === 'processing');
+    return urlList.some(url => {
+      const status = getUrlProcessingStatus(url);
+      return status === 'processing' || status === 'pending';
+    });
   }, [urlList, getUrlProcessingStatus]);
 
   // Calculate scan progress percentage based on URL processing status
@@ -503,8 +506,11 @@ export function RfpScanner() {
       setScanResults(response);
 
       if (response.success) {
-        // Check if this was an async background scan (Azure Function) or sync scan (local)
-        const isBackgroundScan = response.message?.includes('background') || response.saved_to_db === 0;
+        // Check if this was an async background scan (Azure Function/Service Bus) or sync scan (local)
+        // Service Bus queue returns message with "Queued" or "processing"
+        const isBackgroundScan = response.message?.toLowerCase().includes('background')
+          || response.message?.toLowerCase().includes('queued')
+          || response.saved_to_db === 0;
 
         if (isBackgroundScan) {
           // Enable polling to check for status updates and new opportunities
@@ -709,9 +715,16 @@ export function RfpScanner() {
                       <span className="flex-1 text-sm text-gray-700 dark:text-gray-300 truncate">{url}</span>
 
                       {/* Processing status indicator */}
+                      {processingStatus === 'pending' && (
+                        <span title="Queued for processing" className="flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400">
+                          <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                          Queued
+                        </span>
+                      )}
                       {processingStatus === 'processing' && (
-                        <span title="Processing...">
-                          <Loader2 className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" />
+                        <span title="Processing..." className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+                          <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                          Processing
                         </span>
                       )}
                       {processingStatus === 'success' && (

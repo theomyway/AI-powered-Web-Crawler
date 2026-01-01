@@ -61,7 +61,7 @@ class Settings(BaseSettings):
         default=None,
         description="Azure Service Bus connection string"
     )
-    servicebus_queue_name: str = "opportunity-processing"
+    servicebus_queue_name: str = "url-crawl-queue"
     
     # Azure OpenAI
     azure_openai_endpoint: str | None = Field(

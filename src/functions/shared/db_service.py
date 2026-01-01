@@ -51,38 +51,57 @@ def get_db_connection():
 def get_or_create_adhoc_source(conn, url: str) -> uuid.UUID:
     """
     Get or create an ad-hoc crawl source for URL-based scanning.
-    
+
+    Matches sources by base_url (full URL) to ensure each unique URL
+    has its own source for proper tracking.
+
     Args:
         conn: Database connection
         url: The URL being scanned
-        
+
     Returns:
         UUID of the crawl source
     """
     parsed = urlparse(url)
     domain = parsed.netloc or "unknown"
     source_name = f"Ad-hoc: {domain}"
-    base_url = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme else url
-    
+    # Normalize URL for consistent matching
+    normalized_url = url.lower().rstrip('/')
+
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        # Check if source already exists
+        # First, try to find source by exact base_url match
+        # The backend creates sources with base_url = full URL
         cur.execute(
             """
-            SELECT id FROM crawl_sources 
-            WHERE name = %s AND source_type = 'government_portal'
+            SELECT id FROM crawl_sources
+            WHERE LOWER(RTRIM(base_url, '/')) = %s
             """,
-            (source_name,)
+            (normalized_url,)
         )
         result = cur.fetchone()
-        
+
         if result:
             return uuid.UUID(str(result['id']))
-        
-        # Create new source
+
+        # Also try with/without trailing slash
+        alt_url = url.rstrip('/') if url.endswith('/') else url + '/'
+        cur.execute(
+            """
+            SELECT id FROM crawl_sources
+            WHERE base_url = %s OR base_url = %s
+            """,
+            (url, alt_url)
+        )
+        result = cur.fetchone()
+
+        if result:
+            return uuid.UUID(str(result['id']))
+
+        # Create new source if not found
         source_id = uuid.uuid4()
         cur.execute(
             """
-            INSERT INTO crawl_sources 
+            INSERT INTO crawl_sources
             (id, name, source_type, status, state_code, base_url, config, is_enabled, notes, created_at, updated_at)
             VALUES (%s, %s, 'government_portal', 'active', 'US', %s, %s, true, %s, %s, %s)
             RETURNING id
@@ -90,7 +109,7 @@ def get_or_create_adhoc_source(conn, url: str) -> uuid.UUID:
             (
                 str(source_id),
                 source_name,
-                base_url,
+                url,  # Use full URL as base_url for proper tracking
                 '{"selectors": {"opportunity_list": ".opportunity-card"}, "pagination": {"type": "none"}}',
                 "Auto-created source for ad-hoc URL scanning",
                 datetime.utcnow(),
@@ -98,7 +117,7 @@ def get_or_create_adhoc_source(conn, url: str) -> uuid.UUID:
             )
         )
         conn.commit()
-        logger.info(f"Created new ad-hoc source: {source_name} ({source_id})")
+        logger.info(f"Created new ad-hoc source: {source_name} for URL {url} ({source_id})")
         return source_id
 
 
@@ -153,12 +172,12 @@ def save_opportunities_to_db(results: list[dict], crawl_session_id: str) -> int:
                     
                 url = result.get("url", "")
                 opportunities = result.get("opportunities", [])
-                
+
                 for opp in opportunities:
                     # Only save relevant opportunities
                     if not opp.get("is_relevant"):
                         continue
-                    
+
                     try:
                         doc_id = opp.get("document_id")
 
@@ -167,11 +186,12 @@ def save_opportunities_to_db(results: list[dict], crawl_session_id: str) -> int:
                             logger.warning("Skipping opportunity without document_id")
                             continue
 
-                        # Get or create source
-                        domain = urlparse(url).netloc or "unknown"
-                        if domain not in source_cache:
-                            source_cache[domain] = get_or_create_adhoc_source(conn, url)
-                        source_id = source_cache[domain]
+                        # Get or create source using FULL URL as cache key
+                        # This ensures different paths on the same domain get separate sources
+                        normalized_url = url.lower().rstrip('/')
+                        if normalized_url not in source_cache:
+                            source_cache[normalized_url] = get_or_create_adhoc_source(conn, url)
+                        source_id = source_cache[normalized_url]
 
                         # Prepare AI analysis JSON (includes Stage 2 details)
                         ai_analysis = {

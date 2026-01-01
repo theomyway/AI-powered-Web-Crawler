@@ -604,3 +604,119 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
 
+
+async def process_servicebus_message(message_body: str) -> None:
+    """
+    Process a single URL from a Service Bus queue message.
+
+    This function handles sequential processing of URLs - one at a time.
+    Each message contains a single URL to crawl.
+
+    Args:
+        message_body: JSON string containing url, source_id, categories, etc.
+    """
+    start_time = time.time()
+
+    logging.info("=" * 80)
+    logging.info("SERVICE BUS MESSAGE PROCESSING STARTED")
+    logging.info("=" * 80)
+
+    # Parse message
+    try:
+        message = json.loads(message_body)
+    except json.JSONDecodeError as e:
+        logging.error(f"Invalid JSON in message: {e}")
+        raise ValueError(f"Invalid JSON message: {e}")
+
+    url = message.get("url")
+    source_id = message.get("source_id")
+    crawl_session_id = message.get("crawl_session_id", str(datetime.utcnow().timestamp()))
+    categories = message.get("categories", [])
+    backend_url = message.get("backend_url")
+    state_code = message.get("state_code", "TN")
+
+    if not url:
+        logging.error("No URL in message")
+        raise ValueError("No URL provided in message")
+
+    logging.info(f"Processing URL: {url[:80]}...")
+    logging.info(f"Source ID: {source_id}")
+    logging.info(f"Session ID: {crawl_session_id}")
+    logging.info(f"Categories: {categories}")
+    logging.info(f"Backend URL: {backend_url}")
+
+    # Update status to 'processing' immediately when we start
+    if backend_url and source_id:
+        await callback_processing_status(
+            backend_url=backend_url,
+            source_id=source_id,
+            status="processing"
+        )
+
+    try:
+        # Initialize services
+        crawler = PageCrawlerService()
+        classifier = AIClassifierService(selected_categories=categories if categories else None)
+        doc_processor = DocumentProcessorService(page_limit=4)
+
+        # Process the single URL
+        result = await process_single_url(
+            url=url,
+            crawler=crawler,
+            classifier=classifier,
+            doc_processor=doc_processor,
+            state_code=state_code,
+            enable_stage2=True,
+            url_index=1,
+            total_urls=1,
+            backend_url=backend_url,
+            source_id=source_id
+        )
+
+        processing_time = time.time() - start_time
+
+        # Save opportunities to database
+        saved_count = 0
+        db_error = None
+
+        if result.get("success"):
+            try:
+                saved_count = save_opportunities_to_db([result], crawl_session_id)
+                logging.info(f"Saved {saved_count} opportunities to database")
+            except Exception as e:
+                db_error = str(e)
+                logging.error(f"Database save failed: {e}", exc_info=True)
+
+        # Callback to backend with success/failure status
+        if backend_url and source_id:
+            status = "failed" if db_error or not result.get("success") else "success"
+            error_msg = db_error or result.get("error")
+
+            await callback_processing_status(
+                backend_url=backend_url,
+                source_id=source_id,
+                status=status,
+                error_message=error_msg,
+                opportunities_found=saved_count
+            )
+
+        logging.info("=" * 80)
+        logging.info(f"SERVICE BUS MESSAGE PROCESSING COMPLETE")
+        logging.info(f"Duration: {processing_time:.2f}s")
+        logging.info(f"Saved: {saved_count} opportunities")
+        logging.info("=" * 80)
+
+    except Exception as e:
+        logging.error(f"Error processing URL {url}: {e}", exc_info=True)
+
+        # Callback with failure status
+        if backend_url and source_id:
+            await callback_processing_status(
+                backend_url=backend_url,
+                source_id=source_id,
+                status="failed",
+                error_message=f"Processing error: {str(e)}"
+            )
+
+        # Re-raise so the message goes to dead-letter queue
+        raise

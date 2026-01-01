@@ -24,6 +24,10 @@ class Settings:
     azure_doc_intelligence_endpoint: str | None
     azure_doc_intelligence_key: str | None
 
+    # Azure Service Bus
+    servicebus_connection_string: str | None
+    servicebus_queue_name: str
+
     # Crawler Settings - Core
     crawler_proxy_url: str | None
     crawler_proxy_username: str | None
@@ -63,6 +67,10 @@ def get_settings() -> Settings:
         # Azure Document Intelligence
         azure_doc_intelligence_endpoint=os.environ.get("AZURE_DOC_INTELLIGENCE_ENDPOINT"),
         azure_doc_intelligence_key=os.environ.get("AZURE_DOC_INTELLIGENCE_KEY"),
+
+        # Azure Service Bus
+        servicebus_connection_string=os.environ.get("SERVICEBUS_CONNECTION_STRING"),
+        servicebus_queue_name=os.environ.get("SERVICEBUS_QUEUE_NAME", "url-crawl-queue"),
 
         # Crawler - Core
         crawler_proxy_url=os.environ.get("CRAWLER_PROXY_URL") or None,
