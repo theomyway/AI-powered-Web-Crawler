@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator,AnyUrl
 
 from app.models.crawl_source import ProcessingStatus, SourceStatus, SourceType
 
@@ -124,8 +124,8 @@ class CrawlSourceBase(BaseModel):
     state_code: str = Field(min_length=2, max_length=2, pattern=r"^[A-Z]{2}$")
     county: str | None = Field(default=None, max_length=100)
     region: str | None = Field(default=None, max_length=100)
-    base_url: HttpUrl
-    search_url: HttpUrl | None = None
+    base_url: AnyUrl
+    search_url: AnyUrl | None = None
     config: CrawlSourceConfig
     schedule_cron: str | None = Field(default=None, max_length=50)
     crawl_delay: float = Field(default=2.0, ge=0.5, le=30.0)
@@ -155,8 +155,8 @@ class CrawlSourceUpdate(BaseModel):
     state_code: str | None = Field(default=None, min_length=2, max_length=2)
     county: str | None = None
     region: str | None = None
-    base_url: HttpUrl | None = None
-    search_url: HttpUrl | None = None
+    base_url: AnyUrl | None = None
+    search_url: AnyUrl | None = None
     config: CrawlSourceConfig | None = None
     schedule_cron: str | None = None
     crawl_delay: float | None = Field(default=None, ge=0.5, le=30.0)
