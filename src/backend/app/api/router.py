@@ -4,11 +4,18 @@ Main API router that aggregates all endpoint routers.
 
 from fastapi import APIRouter
 
-from app.api.endpoints import sources, opportunities, crawl, dashboard
+from app.api.endpoints import sources, opportunities, crawl, dashboard, auth
 
 api_router = APIRouter()
 
-# Include all endpoint routers
+# Include authentication router (no authentication required for these endpoints)
+api_router.include_router(
+    auth.router,
+    prefix="/auth",
+    tags=["Authentication"],
+)
+
+# Include all endpoint routers (authentication required)
 api_router.include_router(
     sources.router,
     prefix="/sources",

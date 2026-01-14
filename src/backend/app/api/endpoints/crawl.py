@@ -20,6 +20,7 @@ import httpx
 from app.core.config import get_settings
 from app.core.exceptions import EntityNotFoundException, ValidationException
 from app.core.logging import get_logger
+from app.core.auth import get_current_user, TokenUser
 from app.db.session import get_db
 from app.models.crawl_session import CrawlSession, CrawlSessionStatus
 from app.models.crawl_source import CrawlSource, ProcessingStatus, SourceStatus
@@ -123,6 +124,7 @@ async def scan_urls(
     db: DB,
     request: UrlCrawlRequest,
     background_tasks: BackgroundTasks,
+    current_user: TokenUser = Depends(get_current_user),
 ) -> UrlCrawlResponse:
     """
     Scan URLs for RFP opportunities.
@@ -134,6 +136,7 @@ async def scan_urls(
 
     If Azure Function is configured, it calls the Function.
     Otherwise, it runs the crawl locally.
+    Requires authentication.
     """
     crawl_session_id = str(uuid4())
     logger.info(
@@ -510,11 +513,13 @@ async def trigger_crawl(
     db: DB,
     source_id: UUID,
     background_tasks: BackgroundTasks,
+    current_user: TokenUser = Depends(get_current_user),
 ) -> CrawlTriggerResponse:
     """
     Trigger a crawl for a specific source.
-    
+
     Creates a new crawl session and starts the crawl in the background.
+    Requires authentication.
     """
     # Get source
     result = await db.execute(
@@ -583,12 +588,13 @@ async def trigger_crawl(
 @router.get("/sessions", response_model=PaginatedResponse[CrawlSessionResponse])
 async def list_crawl_sessions(
     db: DB,
+    current_user: TokenUser = Depends(get_current_user),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     source_id: UUID | None = None,
     status: CrawlSessionStatus | None = None,
 ) -> PaginatedResponse[CrawlSessionResponse]:
-    """List crawl sessions with optional filtering."""
+    """List crawl sessions with optional filtering. Requires authentication."""
     query = select(CrawlSession)
     count_query = select(func.count(CrawlSession.id))
     
@@ -618,8 +624,12 @@ async def list_crawl_sessions(
 
 
 @router.get("/sessions/{session_id}", response_model=CrawlSessionResponse)
-async def get_crawl_session(db: DB, session_id: UUID) -> CrawlSessionResponse:
-    """Get details of a specific crawl session."""
+async def get_crawl_session(
+    db: DB,
+    session_id: UUID,
+    current_user: TokenUser = Depends(get_current_user),
+) -> CrawlSessionResponse:
+    """Get details of a specific crawl session. Requires authentication."""
     result = await db.execute(
         select(CrawlSession).where(CrawlSession.id == session_id)
     )
@@ -632,8 +642,12 @@ async def get_crawl_session(db: DB, session_id: UUID) -> CrawlSessionResponse:
 
 
 @router.post("/sessions/{session_id}/cancel", response_model=SuccessResponse)
-async def cancel_crawl_session(db: DB, session_id: UUID) -> SuccessResponse:
-    """Cancel a running crawl session."""
+async def cancel_crawl_session(
+    db: DB,
+    session_id: UUID,
+    current_user: TokenUser = Depends(get_current_user),
+) -> SuccessResponse:
+    """Cancel a running crawl session. Requires authentication."""
     result = await db.execute(
         select(CrawlSession).where(CrawlSession.id == session_id)
     )

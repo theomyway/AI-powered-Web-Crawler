@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.models.crawl_session import CrawlSession, CrawlSessionStatus
 from app.models.crawl_source import CrawlSource
 from app.models.opportunity import Opportunity, OpportunityStatus
+from app.core.auth import get_current_user, TokenUser
 
 router = APIRouter()
 
@@ -79,11 +80,15 @@ class UpcomingDeadline(BaseModel):
 
 
 @router.get("/stats", response_model=DashboardStats)
-async def get_dashboard_stats(db: DB) -> DashboardStats:
+async def get_dashboard_stats(
+    db: DB,
+    current_user: TokenUser = Depends(get_current_user),
+) -> DashboardStats:
     """
     Get aggregated dashboard statistics.
-    
+
     Returns counts and breakdowns of opportunities by various dimensions.
+    Requires authentication.
     """
     now = datetime.utcnow()
     week_ago = now - timedelta(days=7)

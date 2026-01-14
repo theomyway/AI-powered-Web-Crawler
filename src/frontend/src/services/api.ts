@@ -1,8 +1,21 @@
 import axios from 'axios';
+import type { InternalAxiosRequestConfig } from 'axios';
+import type { IPublicClientApplication } from '@azure/msal-browser';
 import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, PaginatedResponse } from '../types';
 
 // Use environment variable for API base URL, fallback to relative path for dev proxy
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+
+// Store reference to MSAL instance (set by App component)
+let msalInstance: IPublicClientApplication | null = null;
+
+/**
+ * Configure the API service with the MSAL instance for token acquisition.
+ * This should be called once during app initialization.
+ */
+export function configureApiAuth(instance: IPublicClientApplication) {
+  msalInstance = instance;
+}
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -14,6 +27,46 @@ const api = axios.create({
     indexes: null, // This makes axios serialize arrays as param=value1&param=value2
   },
 });
+
+// Request interceptor to add authentication token
+api.interceptors.request.use(
+  async (config: InternalAxiosRequestConfig) => {
+    if (!msalInstance) {
+      return config;
+    }
+
+    try {
+      const account = msalInstance.getActiveAccount();
+      if (account) {
+        const response = await msalInstance.acquireTokenSilent({
+          scopes: ['User.Read'],
+          account: account,
+        });
+        config.headers.Authorization = `Bearer ${response.idToken}`;
+      }
+    } catch (error) {
+      console.warn('Failed to acquire token silently:', error);
+      // If silent token acquisition fails, the request will proceed without auth
+      // The backend will return 401 and the UI should handle re-authentication
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor to handle 401 errors
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401 && msalInstance) {
+      // Token expired or invalid - redirect to login
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const dashboardApi = {
   getStats: async (): Promise<DashboardStats> => {

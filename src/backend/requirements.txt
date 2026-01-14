@@ -37,3 +37,7 @@ python-json-logger>=2.0.7
 tenacity>=8.2.3
 aiofiles>=23.2.1
 
+# Authentication
+PyJWT>=2.8.0
+cryptography>=42.0.0
+

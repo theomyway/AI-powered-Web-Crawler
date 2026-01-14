@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import DuplicateEntityException, EntityNotFoundException
 from app.core.logging import get_logger
+from app.core.auth import get_current_user, TokenUser
 from app.db.session import get_db
 from app.models.crawl_source import CrawlSource, ProcessingStatus, SourceStatus, SourceType
 from app.schemas.crawl_source import (
@@ -36,6 +37,7 @@ DB = Annotated[AsyncSession, Depends(get_db)]
 @router.get("", response_model=PaginatedResponse[CrawlSourceResponse])
 async def list_sources(
     db: DB,
+    current_user: TokenUser = Depends(get_current_user),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     source_type: SourceType | None = None,
@@ -45,8 +47,9 @@ async def list_sources(
 ) -> PaginatedResponse[CrawlSourceResponse]:
     """
     List all crawl sources with optional filtering.
-    
+
     Supports filtering by source type, state, status, and enabled flag.
+    Requires authentication.
     """
     # Build query
     query = select(CrawlSource)
@@ -86,8 +89,12 @@ async def list_sources(
 
 
 @router.get("/{source_id}", response_model=CrawlSourceResponse)
-async def get_source(db: DB, source_id: UUID) -> CrawlSourceResponse:
-    """Get a specific crawl source by ID."""
+async def get_source(
+    db: DB,
+    source_id: UUID,
+    current_user: TokenUser = Depends(get_current_user),
+) -> CrawlSourceResponse:
+    """Get a specific crawl source by ID. Requires authentication."""
     result = await db.execute(
         select(CrawlSource).where(CrawlSource.id == source_id)
     )
@@ -100,12 +107,16 @@ async def get_source(db: DB, source_id: UUID) -> CrawlSourceResponse:
 
 
 @router.post("", response_model=CrawlSourceResponse, status_code=status.HTTP_201_CREATED)
-async def create_source(db: DB, data: CrawlSourceCreate) -> CrawlSourceResponse:
+async def create_source(
+    db: DB,
+    data: CrawlSourceCreate,
+    current_user: TokenUser = Depends(get_current_user),
+) -> CrawlSourceResponse:
     """
     Create a new crawl source.
-    
+
     The source configuration defines how the crawler will extract
-    opportunities from the target website.
+    opportunities from the target website. Requires authentication.
     """
     # Check for duplicate name + state combination
     existing = await db.execute(
@@ -143,8 +154,13 @@ async def create_source(db: DB, data: CrawlSourceCreate) -> CrawlSourceResponse:
 
 
 @router.patch("/{source_id}", response_model=CrawlSourceResponse)
-async def update_source(db: DB, source_id: UUID, data: CrawlSourceUpdate) -> CrawlSourceResponse:
-    """Update an existing crawl source."""
+async def update_source(
+    db: DB,
+    source_id: UUID,
+    data: CrawlSourceUpdate,
+    current_user: TokenUser = Depends(get_current_user),
+) -> CrawlSourceResponse:
+    """Update an existing crawl source. Requires authentication."""
     result = await db.execute(
         select(CrawlSource).where(CrawlSource.id == source_id)
     )
@@ -172,8 +188,12 @@ async def update_source(db: DB, source_id: UUID, data: CrawlSourceUpdate) -> Cra
 
 
 @router.delete("/{source_id}", response_model=SuccessResponse)
-async def delete_source(db: DB, source_id: UUID) -> SuccessResponse:
-    """Delete a crawl source."""
+async def delete_source(
+    db: DB,
+    source_id: UUID,
+    current_user: TokenUser = Depends(get_current_user),
+) -> SuccessResponse:
+    """Delete a crawl source. Requires authentication."""
     result = await db.execute(
         select(CrawlSource).where(CrawlSource.id == source_id)
     )
@@ -193,12 +213,14 @@ async def update_source_processing_status(
     db: DB,
     source_id: UUID,
     data: ProcessingStatusUpdate,
+    current_user: TokenUser = Depends(get_current_user),
 ) -> CrawlSourceResponse:
     """
     Update the processing status of a crawl source.
 
     This endpoint is called by the Azure Function to report crawl completion.
     It updates the processing_status field and related timestamps.
+    Requires authentication.
     """
     result = await db.execute(
         select(CrawlSource).where(CrawlSource.id == source_id)
@@ -258,12 +280,13 @@ async def update_source_progress(
     db: DB,
     source_id: UUID,
     data: ProgressUpdate,
+    current_user: TokenUser = Depends(get_current_user),
 ) -> CrawlSourceResponse:
     """
     Update the real-time progress of a crawl source.
 
     This endpoint is called by the Azure Function during crawl processing
-    to report granular progress updates at each step.
+    to report granular progress updates at each step. Requires authentication.
     """
     result = await db.execute(
         select(CrawlSource).where(CrawlSource.id == source_id)

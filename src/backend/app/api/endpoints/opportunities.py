@@ -16,6 +16,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import EntityNotFoundException
 from app.core.logging import get_logger
+from app.core.auth import get_current_user, TokenUser
 from app.db.session import get_db
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.schemas.opportunity import (
@@ -35,6 +36,7 @@ DB = Annotated[AsyncSession, Depends(get_db)]
 @router.get("", response_model=OpportunityListResponse)
 async def list_opportunities(
     db: DB,
+    current_user: TokenUser = Depends(get_current_user),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     status: list[OpportunityStatus] | None = Query(default=None),
@@ -51,9 +53,9 @@ async def list_opportunities(
 ) -> OpportunityListResponse:
     """
     List opportunities with comprehensive filtering.
-    
+
     Supports filtering by status, category, state, prequalification,
-    deadlines, and full-text search.
+    deadlines, and full-text search. Requires authentication.
     """
     # Build base query
     query = select(Opportunity).where(Opportunity.deleted_at.is_(None))
@@ -167,8 +169,12 @@ async def list_opportunities(
 
 
 @router.get("/{opportunity_id}", response_model=OpportunityResponse)
-async def get_opportunity(db: DB, opportunity_id: UUID) -> OpportunityResponse:
-    """Get detailed information about a specific opportunity."""
+async def get_opportunity(
+    db: DB,
+    opportunity_id: UUID,
+    current_user: TokenUser = Depends(get_current_user),
+) -> OpportunityResponse:
+    """Get detailed information about a specific opportunity. Requires authentication."""
     result = await db.execute(
         select(Opportunity)
         .where(Opportunity.id == opportunity_id, Opportunity.deleted_at.is_(None))
@@ -190,8 +196,9 @@ async def update_opportunity(
     db: DB,
     opportunity_id: UUID,
     data: OpportunityUpdate,
+    current_user: TokenUser = Depends(get_current_user),
 ) -> OpportunityResponse:
-    """Update opportunity details (status, notes, etc.)."""
+    """Update opportunity details (status, notes, etc.). Requires authentication."""
     result = await db.execute(
         select(Opportunity)
         .where(Opportunity.id == opportunity_id, Opportunity.deleted_at.is_(None))
@@ -221,12 +228,15 @@ async def update_opportunity(
 
 
 @router.delete("", status_code=status.HTTP_200_OK)
-async def delete_all_opportunities(db: DB) -> dict:
+async def delete_all_opportunities(
+    db: DB,
+    current_user: TokenUser = Depends(get_current_user),
+) -> dict:
     """
     Delete all opportunities from the database.
 
     WARNING: This is a destructive operation intended for testing/development.
-    Use with caution.
+    Use with caution. Requires authentication.
 
     Returns:
         dict: Count of deleted records

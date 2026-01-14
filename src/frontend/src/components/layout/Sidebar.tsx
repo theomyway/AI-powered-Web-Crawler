@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Scan, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Scan, Sun, Moon, LogOut } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -9,6 +10,11 @@ const navigation = [
 
 export function Sidebar() {
   const { theme, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+  };
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col">
@@ -43,11 +49,24 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Theme Toggle & Footer */}
+      {/* User Info, Theme Toggle & Footer */}
       <div className="px-4 py-4 border-t border-gray-100 dark:border-gray-800">
+        {/* User Info */}
+        {user && (
+          <div className="mb-3 px-3 py-2">
+            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+              {user.name || user.username}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              {user.username}
+            </p>
+          </div>
+        )}
+
+        {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
-          className="flex items-center gap-2 w-full px-3 py-2 mb-3 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          className="flex items-center gap-2 w-full px-3 py-2 mb-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
         >
           {theme === 'light' ? (
             <>
@@ -61,6 +80,16 @@ export function Sidebar() {
             </>
           )}
         </button>
+
+        {/* Logout Button */}
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-2 w-full px-3 py-2 mb-3 rounded-lg text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+        >
+          <LogOut className="w-5 h-5" />
+          Sign Out
+        </button>
+
         <p className="text-xs text-gray-400">Pilot: Tennessee</p>
         <p className="text-xs text-gray-400">v1.0.0 beta</p>
       </div>
