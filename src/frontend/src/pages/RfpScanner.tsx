@@ -270,7 +270,7 @@ export function RfpScanner() {
       };
       if (searchQuery) params.search = searchQuery;
       if (categoryFilter) params.categories = [categoryFilter];
-      if (prequalRequired) params.requires_prequalification = true;
+      if (prequalRequired) params.requires_prequalification = false;
 
       const response = await opportunitiesApi.listWithFilters(params);
       setOpportunities(response.items);
@@ -882,7 +882,7 @@ export function RfpScanner() {
                   }`}
                 />
               </div>
-              <span className="text-sm text-gray-700 dark:text-gray-300">Pre-qual Required</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">Pre-qual Not Required</span>
             </label>
           </div>
         </div>
