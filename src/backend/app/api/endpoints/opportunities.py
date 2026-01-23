@@ -227,6 +227,71 @@ async def update_opportunity(
     return OpportunityResponse.model_validate(opportunity)
 
 
+@router.delete("/{opportunity_id}", status_code=status.HTTP_200_OK)
+async def delete_opportunity(
+    db: DB,
+    opportunity_id: UUID,
+    current_user: TokenUser = Depends(get_current_user),
+) -> dict:
+    """
+    Delete a single opportunity by ID.
+
+    Requires authentication.
+
+    Returns:
+        dict: Success message
+    """
+    result = await db.execute(
+        select(Opportunity).where(
+            Opportunity.id == opportunity_id,
+            Opportunity.deleted_at.is_(None)
+        )
+    )
+    opportunity = result.scalar_one_or_none()
+
+    if not opportunity:
+        raise EntityNotFoundException("Opportunity", str(opportunity_id))
+
+    await db.delete(opportunity)
+    await db.commit()
+
+    logger.info("Opportunity deleted", opportunity_id=str(opportunity_id))
+
+    return {"message": f"Opportunity deleted successfully", "id": str(opportunity_id)}
+
+
+@router.post("/bulk-delete", status_code=status.HTTP_200_OK)
+async def bulk_delete_opportunities(
+    db: DB,
+    opportunity_ids: list[UUID],
+    current_user: TokenUser = Depends(get_current_user),
+) -> dict:
+    """
+    Delete multiple opportunities by their IDs.
+
+    Requires authentication.
+
+    Returns:
+        dict: Count of deleted records
+    """
+    if not opportunity_ids:
+        return {"deleted_count": 0, "message": "No opportunities to delete"}
+
+    # Delete opportunities matching the IDs
+    from sqlalchemy import delete
+    delete_stmt = delete(Opportunity).where(
+        Opportunity.id.in_(opportunity_ids),
+        Opportunity.deleted_at.is_(None)
+    )
+    result = await db.execute(delete_stmt)
+    deleted_count = result.rowcount
+    await db.commit()
+
+    logger.info("Bulk delete opportunities", deleted_count=deleted_count, requested_count=len(opportunity_ids))
+
+    return {"deleted_count": deleted_count, "message": f"Successfully deleted {deleted_count} opportunities"}
+
+
 @router.delete("", status_code=status.HTTP_200_OK)
 async def delete_all_opportunities(
     db: DB,

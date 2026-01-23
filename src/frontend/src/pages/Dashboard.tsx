@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { Info, RefreshCw, Search, ArrowRight, X } from 'lucide-react';
 import { StatsCards, OpportunitiesTable, CrawlerStatus } from '../components/dashboard';
 import { dashboardApi, opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
-import type { DashboardStats, Opportunity, CrawlSession } from '../types';
+import type { DashboardStats, Opportunity, CrawlSession, CrawlSource } from '../types';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [latestSession, setLatestSession] = useState<CrawlSession | null>(null);
+  const [processingSources, setProcessingSources] = useState<CrawlSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -29,6 +30,22 @@ export function Dashboard() {
 
       setStats(statsData);
       setOpportunities(oppsData.items);
+
+      // Track sources that are currently processing (only if started recently - within last 10 minutes)
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      const currentlyProcessing = sources.filter(s => {
+        // Must have processing or pending status
+        if (s.processing_status !== 'processing' && s.processing_status !== 'pending') {
+          return false;
+        }
+        // Must have started recently (within last 10 minutes) to be considered active
+        if (s.last_crawl_started_at) {
+          const startedAt = new Date(s.last_crawl_started_at);
+          return startedAt > tenMinutesAgo;
+        }
+        return false;
+      });
+      setProcessingSources(currentlyProcessing);
 
       // Find the most recent session with meaningful data
       const sessions = sessionsData.items;
@@ -87,10 +104,11 @@ export function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(() => fetchData(true), 30000);
+    // Poll more frequently (5s) when crawl is in progress, otherwise every 30s
+    const pollInterval = processingSources.length > 0 ? 5000 : 30000;
+    const interval = setInterval(() => fetchData(true), pollInterval);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, processingSources.length]);
 
   return (
     <div className="space-y-8">
@@ -178,6 +196,7 @@ export function Dashboard() {
           <CrawlerStatus
             session={latestSession}
             loading={loading}
+            processingSources={processingSources}
           />
         </div>
       </div>

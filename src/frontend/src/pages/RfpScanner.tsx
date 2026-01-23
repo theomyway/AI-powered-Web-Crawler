@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Play, Plus, ExternalLink, ChevronDown, Wand2, Globe, Settings, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { formatDistanceToNow, parseISO, isPast } from 'date-fns';
+import { Search, Play, Plus, ExternalLink, ChevronDown, Wand2, Globe, Settings, X, Loader2, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
+import { formatDistanceToNow, parseISO, isPast, differenceInMinutes } from 'date-fns';
 import { opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
 import type { Opportunity, CrawlSource, ProcessingStatus } from '../types';
 import type { UrlCrawlResponse } from '../services/api';
@@ -10,6 +10,9 @@ const POLLING_INTERVAL_MS = 5 * 1000;
 
 // Progress bar animation duration in ms
 const PROGRESS_ANIMATION_DURATION = 300;
+
+// Maximum time in minutes before considering a "processing" source as stuck
+const STUCK_PROCESSING_TIMEOUT_MINUTES = 10;
 
 // Category options matching the backend
 const CATEGORIES = [
@@ -114,6 +117,25 @@ export function RfpScanner() {
     return url.toLowerCase().replace(/\/+$/, '');
   }, []);
 
+  // Helper to check if a source is stuck (processing for too long without updates)
+  const isSourceStuck = useCallback((source: CrawlSource): boolean => {
+    if (source.processing_status !== 'processing' && source.processing_status !== 'pending') {
+      return false;
+    }
+
+    // Check if the source has been processing for too long
+    if (source.last_crawl_started_at) {
+      const startTime = parseISO(source.last_crawl_started_at);
+      const minutesElapsed = differenceInMinutes(new Date(), startTime);
+      if (minutesElapsed >= STUCK_PROCESSING_TIMEOUT_MINUTES) {
+        console.log(`Source ${source.name} appears stuck (processing for ${minutesElapsed} minutes)`);
+        return true;
+      }
+    }
+
+    return false;
+  }, []);
+
   // Helper to get processing status for a URL from sources
   // Supports both exact matches and partial matches (source base_url as prefix)
   // Only returns status if the source was scanned in the current session
@@ -137,19 +159,28 @@ export function RfpScanner() {
       const sessionStartTime = new Date(lastScanStartTime);
       // Only show status if the crawl started at or after the current session
       if (sourceStartTime >= sessionStartTime) {
+        // Check if source is stuck ONLY for current session sources
+        if (isSourceStuck(source)) {
+          return null;
+        }
         return source.processing_status || null;
       }
     }
 
     // If currently polling (scan in progress), show status for URLs being scanned
     if (isPollingActive && (source.processing_status === 'processing' || source.processing_status === 'pending')) {
+      // Check if stuck before returning processing status
+      if (isSourceStuck(source)) {
+        return null;
+      }
       return source.processing_status;
     }
 
     return null;
-  }, [sources, normalizeUrl, lastScanStartTime, isPollingActive]);
+  }, [sources, normalizeUrl, lastScanStartTime, isPollingActive, isSourceStuck]);
 
   // Check if any URL is currently processing or pending (based on sources data)
+  // Excludes sources that appear to be stuck
   const hasProcessingUrls = useCallback((): boolean => {
     return urlList.some(url => {
       const status = getUrlProcessingStatus(url);
@@ -200,47 +231,82 @@ export function RfpScanner() {
 
   // Effect to update progress bar when sources change
   useEffect(() => {
-    if (showProgressBar) {
-      // Check if there are any sources still processing
-      const processingSources = sources.filter(s => s.processing_status === 'processing');
+    // Don't process if progress bar is not shown
+    if (!showProgressBar) return;
 
-      if (processingSources.length > 0) {
-        // Get the max progress from all processing sources
-        const maxProgress = Math.max(
-          ...processingSources.map(s => s.progress_percent ?? 0)
-        );
-        setProgressPercent(maxProgress);
-      } else if (scanningUrlsRef.current.length > 0) {
-        // Fallback to local tracking
-        const newProgress = calculateProgress();
-        setProgressPercent(newProgress);
+    // Don't auto-hide while actively scanning - let the scan complete first
+    if (isScanning) {
+      console.log('Progress effect: skipping while isScanning=true');
+      return;
+    }
 
-        // Check if all URLs are complete
-        const allComplete = scanningUrlsRef.current.every(url => {
-          const status = getUrlProcessingStatus(url);
-          return status === 'success' || status === 'failed';
-        });
+    // Check if there are any sources still processing (excluding stuck ones)
+    const processingSources = sources.filter(s =>
+      s.processing_status === 'processing' && !isSourceStuck(s)
+    );
 
-        if (allComplete) {
-          // Animate to 100% then hide
-          setProgressPercent(100);
-          setTimeout(() => {
-            setShowProgressBar(false);
-            setProgressPercent(0);
-            scanningUrlsRef.current = [];
-          }, 800); // Brief delay to show 100% complete
-        }
-      } else {
-        // No sources processing and no local tracking - hide progress bar
-        // This happens when all processing is complete
+    // Only check for stuck sources if we're not in the middle of starting a scan
+    // and there are actually sources with processing/pending status
+    const processingOrPendingSources = sources.filter(
+      s => s.processing_status === 'processing' || s.processing_status === 'pending'
+    );
+
+    // Only consider "all stuck" if there are processing sources AND they're all stuck
+    // AND we have URLs we're tracking (scanningUrlsRef)
+    const allStuck = processingOrPendingSources.length > 0 &&
+      scanningUrlsRef.current.length > 0 &&
+      processingOrPendingSources.every(s => isSourceStuck(s));
+
+    if (allStuck) {
+      // All sources are stuck - hide progress bar and stop polling
+      console.log('All processing sources appear stuck, hiding progress bar');
+      setShowProgressBar(false);
+      setProgressPercent(0);
+      scanningUrlsRef.current = [];
+      setIsPollingActive(false);
+      return;
+    }
+
+    if (processingSources.length > 0) {
+      // Get the max progress from all processing sources
+      const maxProgress = Math.max(
+        ...processingSources.map(s => s.progress_percent ?? 0)
+      );
+      // Don't go below current progress (prevent jumps backwards)
+      setProgressPercent(prev => Math.max(prev, maxProgress));
+    } else if (scanningUrlsRef.current.length > 0) {
+      // Fallback to local tracking
+      const newProgress = calculateProgress();
+      // Don't go below current progress (prevent jumps backwards)
+      setProgressPercent(prev => Math.max(prev, newProgress));
+
+      // Check if all URLs have a definitive status (success or failed)
+      // Don't treat null as complete - it means we're still waiting for status
+      const allComplete = scanningUrlsRef.current.every(url => {
+        const status = getUrlProcessingStatus(url);
+        return status === 'success' || status === 'failed';
+      });
+
+      // Also check if any URL has started processing (not null)
+      const anyStarted = scanningUrlsRef.current.some(url => {
+        const status = getUrlProcessingStatus(url);
+        return status !== null;
+      });
+
+      // Only hide if all complete AND at least one has started
+      // This prevents hiding the bar immediately after scan starts
+      if (allComplete && anyStarted) {
+        // Animate to 100% then hide
         setProgressPercent(100);
         setTimeout(() => {
           setShowProgressBar(false);
           setProgressPercent(0);
-        }, 800);
+          scanningUrlsRef.current = [];
+        }, 800); // Brief delay to show 100% complete
       }
     }
-  }, [sources, showProgressBar, calculateProgress, getUrlProcessingStatus]);
+    // No else block - keep progress bar visible while waiting for status updates
+  }, [sources, showProgressBar, isScanning, calculateProgress, getUrlProcessingStatus, isSourceStuck]);
 
   // Helper to check if an opportunity was created after the last scan started
   const isNewOpportunity = useCallback((opportunity: Opportunity): boolean => {
@@ -259,6 +325,10 @@ export function RfpScanner() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  // Delete state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Fetch opportunities with filters
   const fetchOpportunities = useCallback(async () => {
@@ -297,6 +367,44 @@ export function RfpScanner() {
     }
   }, []);
 
+  // Delete handlers
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(opportunities.map(o => o.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    const newSet = new Set(selectedIds);
+    if (checked) {
+      newSet.add(id);
+    } else {
+      newSet.delete(id);
+    }
+    setSelectedIds(newSet);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      setBulkDeleting(true);
+      const ids = Array.from(selectedIds);
+      await opportunitiesApi.bulkDelete(ids);
+      setSelectedIds(new Set());
+      // Refresh the list
+      fetchOpportunities();
+    } catch (error) {
+      console.error('Failed to bulk delete opportunities:', error);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const allSelected = opportunities.length > 0 && selectedIds.size === opportunities.length;
+  const someSelected = selectedIds.size > 0 && selectedIds.size < opportunities.length;
+
   // Save URLs to localStorage whenever urlList changes
   useEffect(() => {
     try {
@@ -317,7 +425,22 @@ export function RfpScanner() {
     const checkForProcessingSources = async () => {
       try {
         const allSources = await sourcesApi.getAll();
-        const processingSources = allSources.filter(s => s.processing_status === 'processing');
+
+        // Filter processing sources, excluding ones that appear stuck
+        const processingSources = allSources.filter(s => {
+          if (s.processing_status !== 'processing') return false;
+
+          // Check if stuck (processing for too long)
+          if (s.last_crawl_started_at) {
+            const startTime = parseISO(s.last_crawl_started_at);
+            const minutesElapsed = differenceInMinutes(new Date(), startTime);
+            if (minutesElapsed >= STUCK_PROCESSING_TIMEOUT_MINUTES) {
+              console.log(`Ignoring stuck source on mount: ${s.base_url} (${minutesElapsed} min)`);
+              return false;
+            }
+          }
+          return true;
+        });
 
         if (processingSources.length > 0) {
           console.log('Found processing sources on mount:', processingSources.map(s => s.base_url));
@@ -887,11 +1010,32 @@ export function RfpScanner() {
           </div>
         </div>
 
-        {/* Opportunities Count */}
-        <div className="px-6 py-3 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
-          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {totalOpportunities} Opportunities Found
-          </p>
+        {/* Opportunities Count and Bulk Delete */}
+        <div className="px-6 py-3 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {totalOpportunities} Opportunities Found
+            </p>
+            {selectedIds.size > 0 && (
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                ({selectedIds.size} selected)
+              </span>
+            )}
+          </div>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 rounded-lg transition-colors"
+            >
+              {bulkDeleting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4" />
+              )}
+              Delete Selected ({selectedIds.size})
+            </button>
+          )}
         </div>
 
         {/* Table */}
@@ -914,14 +1058,23 @@ export function RfpScanner() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed">
+            <table className="w-full table-fixed min-w-[900px]">
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <th className="w-[35%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
+                  <th className="w-[5%] px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 bg-transparent border-2 border-gray-400 dark:border-gray-500 rounded focus:ring-blue-500 focus:ring-2 checked:bg-blue-600 checked:border-blue-600"
+                    />
+                  </th>
+                  <th className="w-[30%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
                   <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
-                  <th className="w-[25%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">RFP URL</th>
-                  <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
-                  <th className="w-[10%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                  <th className="w-[22%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">RFP URL</th>
+                  <th className="w-[12%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
+                  <th className="w-[16%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -929,13 +1082,22 @@ export function RfpScanner() {
                   const deadline = formatDeadline(opp.submission_deadline);
                   const primaryCategory = getPrimaryCategory(opp);
                   const isNew = isNewOpportunity(opp);
+                  const isSelected = selectedIds.has(opp.id);
                   return (
                     <tr
                       key={opp.id}
                       className={`hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                         isNew ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-400' : ''
-                      }`}
+                      } ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
                     >
+                      <td className="px-4 py-4">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => handleSelectOne(opp.id, e.target.checked)}
+                          className="w-4 h-4 text-blue-600 bg-transparent border-2 border-gray-400 dark:border-gray-500 rounded focus:ring-blue-500 focus:ring-2 checked:bg-blue-600 checked:border-blue-600"
+                        />
+                      </td>
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-2 min-w-0">
                           <div className="min-w-0 flex-1">

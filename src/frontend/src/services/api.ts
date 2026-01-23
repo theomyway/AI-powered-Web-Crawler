@@ -125,6 +125,21 @@ export const opportunitiesApi = {
     const response = await api.get<Opportunity>(`/opportunities/${id}`);
     return response.data;
   },
+
+  delete: async (id: string): Promise<{ message: string; id: string }> => {
+    const response = await api.delete<{ message: string; id: string }>(`/opportunities/${id}`);
+    return response.data;
+  },
+
+  bulkDelete: async (ids: string[]): Promise<{ deleted_count: number; message: string }> => {
+    const response = await api.post<{ deleted_count: number; message: string }>('/opportunities/bulk-delete', ids);
+    return response.data;
+  },
+
+  deleteAll: async (): Promise<{ deleted_count: number; message: string }> => {
+    const response = await api.delete<{ deleted_count: number; message: string }>('/opportunities');
+    return response.data;
+  },
 };
 
 // Types for URL-based crawl

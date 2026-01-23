@@ -104,6 +104,12 @@ class Settings(BaseSettings):
         description="Backend API URL for Azure Function callbacks"
     )
 
+    # Internal API Key for service-to-service authentication (Azure Function -> Backend)
+    internal_api_key: str | None = Field(
+        default=None,
+        description="Shared secret for Azure Function to Backend communication"
+    )
+
     # Crawler Proxy (for geo-restricted sites)
     crawler_proxy_url: str | None = Field(
         default=None,

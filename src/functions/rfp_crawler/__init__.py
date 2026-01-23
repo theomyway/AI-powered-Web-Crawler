@@ -25,7 +25,7 @@ from dataclasses import asdict
 from datetime import datetime
 
 from shared.config import get_settings
-from shared.page_crawler import PageCrawlerService
+from shared.page_crawler_lite import PageCrawlerService  # Lightweight version (no Playwright)
 from shared.ai_classifier import AIClassifierService
 from shared.document_processor import DocumentProcessorService
 from shared.models import OpportunityCategory, ExtractedRFP
@@ -48,6 +48,15 @@ def log_step(step_num: int, step_name: str, status: str,
     logging.info(f"{timestamp} - {log_msg}")
 
 
+def _get_internal_headers() -> dict:
+    """Get headers for internal API calls including the API key."""
+    settings = get_settings()
+    headers = {"Content-Type": "application/json"}
+    if settings.internal_api_key:
+        headers["X-Internal-API-Key"] = settings.internal_api_key
+    return headers
+
+
 async def callback_processing_status(
     backend_url: str,
     source_id: str,
@@ -57,6 +66,8 @@ async def callback_processing_status(
 ):
     """
     Callback to the backend to update processing status.
+
+    Uses the internal API endpoint with API key authentication.
 
     Args:
         backend_url: Base URL of the backend API
@@ -70,15 +81,17 @@ async def callback_processing_status(
         return
 
     try:
-        url = f"{backend_url}/api/v1/sources/{source_id}/status"
+        # Use internal endpoint for service-to-service communication
+        url = f"{backend_url}/api/v1/internal/sources/{source_id}/status"
         payload = {
             "processing_status": status,
             "processing_error_message": error_message,
             "opportunities_found": opportunities_found
         }
+        headers = _get_internal_headers()
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.patch(url, json=payload)
+            response = await client.patch(url, json=payload, headers=headers)
 
             if response.status_code == 200:
                 logging.info(f"Successfully updated processing status for source {source_id} to {status}")
@@ -98,6 +111,8 @@ async def callback_progress_update(
     """
     Callback to the backend to update real-time progress.
 
+    Uses the internal API endpoint with API key authentication.
+
     Args:
         backend_url: Base URL of the backend API
         source_id: UUID of the crawl source
@@ -113,17 +128,19 @@ async def callback_progress_update(
         return  # Skip silently for ad-hoc URLs without source_id
 
     try:
-        url = f"{backend_url}/api/v1/sources/{source_id}/progress"
+        # Use internal endpoint for service-to-service communication
+        url = f"{backend_url}/api/v1/internal/sources/{source_id}/progress"
         payload = {
             "progress_percent": min(max(progress_percent, 0), 100),
             "progress_message": progress_message,
             "current_processing_url": current_processing_url[:500] if current_processing_url else None
         }
+        headers = _get_internal_headers()
 
         logging.info(f"Sending progress update: {progress_percent}% to {url}")
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.patch(url, json=payload)
+            response = await client.patch(url, json=payload, headers=headers)
 
             if response.status_code != 200:
                 logging.warning(f"Progress update response: {response.status_code} - {response.text}")

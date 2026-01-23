@@ -28,6 +28,9 @@ class Settings:
     servicebus_connection_string: str | None
     servicebus_queue_name: str
 
+    # Internal API Key for service-to-service authentication
+    internal_api_key: str | None
+
     # Crawler Settings - Core
     crawler_proxy_url: str | None
     crawler_proxy_username: str | None
@@ -71,6 +74,9 @@ def get_settings() -> Settings:
         # Azure Service Bus
         servicebus_connection_string=os.environ.get("SERVICEBUS_CONNECTION_STRING"),
         servicebus_queue_name=os.environ.get("SERVICEBUS_QUEUE_NAME", "url-crawl-queue"),
+
+        # Internal API Key
+        internal_api_key=os.environ.get("INTERNAL_API_KEY"),
 
         # Crawler - Core
         crawler_proxy_url=os.environ.get("CRAWLER_PROXY_URL") or None,

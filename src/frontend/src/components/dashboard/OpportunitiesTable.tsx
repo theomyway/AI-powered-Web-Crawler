@@ -1,10 +1,14 @@
-import { ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, Trash2, Loader2 } from 'lucide-react';
 import { formatDistanceToNow, parseISO, isPast, differenceInHours } from 'date-fns';
 import type { Opportunity } from '../../types';
+import { opportunitiesApi } from '../../services/api';
 
 interface OpportunitiesTableProps {
   opportunities: Opportunity[];
   loading: boolean;
+  onDelete?: (ids: string[]) => void;
+  showDeleteActions?: boolean;
 }
 
 function getCategoryColor(category: string | null): string {
@@ -80,7 +84,11 @@ function TableSkeleton() {
   );
 }
 
-export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTableProps) {
+export function OpportunitiesTable({ opportunities, loading, onDelete, showDeleteActions = false }: OpportunitiesTableProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Get the primary category from the categories array
   const getPrimaryCategory = (opp: Opportunity): string | null => {
     if (opp.categories && opp.categories.length > 0) {
@@ -88,6 +96,63 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
     }
     return opp.category || null;
   };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(opportunities.map(o => o.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    const newSet = new Set(selectedIds);
+    if (checked) {
+      newSet.add(id);
+    } else {
+      newSet.delete(id);
+    }
+    setSelectedIds(newSet);
+  };
+
+  const handleDeleteOne = async (id: string) => {
+    try {
+      setDeletingIds(prev => new Set(prev).add(id));
+      await opportunitiesApi.delete(id);
+      setSelectedIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      onDelete?.([id]);
+    } catch (error) {
+      console.error('Failed to delete opportunity:', error);
+    } finally {
+      setDeletingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      setBulkDeleting(true);
+      const ids = Array.from(selectedIds);
+      await opportunitiesApi.bulkDelete(ids);
+      setSelectedIds(new Set());
+      onDelete?.(ids);
+    } catch (error) {
+      console.error('Failed to bulk delete opportunities:', error);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const allSelected = opportunities.length > 0 && selectedIds.size === opportunities.length;
+  const someSelected = selectedIds.size > 0 && selectedIds.size < opportunities.length;
 
   if (loading) {
     return (
@@ -102,8 +167,31 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Opportunities</h2>
+      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            {opportunities.length} Opportunities Found
+          </h2>
+          {showDeleteActions && selectedIds.size > 0 && (
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              ({selectedIds.size} selected)
+            </span>
+          )}
+        </div>
+        {showDeleteActions && selectedIds.size > 0 && (
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 rounded-lg transition-colors"
+          >
+            {bulkDeleting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            Delete Selected ({selectedIds.size})
+          </button>
+        )}
       </div>
 
       {opportunities.length === 0 ? (
@@ -112,14 +200,25 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
         </div>
       ) : (
         <div className="overflow-x-auto max-h-[400px] overflow-y-auto dark-scrollbar">
-          <table className="w-full table-fixed">
+          <table className="w-full table-fixed min-w-[850px]">
             <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
               <tr>
-                <th className="w-[35%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Title</th>
-                <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
-                <th className="w-[25%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">RFP URL</th>
-                <th className="w-[15%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
-                <th className="w-[10%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                {showDeleteActions && (
+                  <th className="w-[5%] px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-600 border-gray-300 dark:border-gray-500 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                  </th>
+                )}
+                <th className={`${showDeleteActions ? 'w-[23%]' : 'w-[26%]'} px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider`}>Title</th>
+                <th className="w-[18%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Category</th>
+                <th className="w-[22%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">RFP URL</th>
+                <th className="w-[12%] px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Deadline</th>
+                <th className={`${showDeleteActions ? 'w-[20%]' : 'w-[16%]'} px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider`}>Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -127,13 +226,26 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
                 const deadline = formatDeadline(opp.submission_deadline);
                 const primaryCategory = getPrimaryCategory(opp);
                 const isNew = isNewOpportunity(opp);
+                const isSelected = selectedIds.has(opp.id);
+                const isDeleting = deletingIds.has(opp.id);
                 return (
                   <tr
                     key={opp.id}
                     className={`hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                       isNew ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-400' : ''
-                    }`}
+                    } ${isSelected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
                   >
+                    {showDeleteActions && (
+                      <td className="px-4 py-4">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => handleSelectOne(opp.id, e.target.checked)}
+                          disabled={isDeleting}
+                          className="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-600 border-gray-300 dark:border-gray-500 rounded focus:ring-blue-500 focus:ring-2"
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="min-w-0 flex-1">
@@ -152,10 +264,10 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
                         {formatCategoryLabel(primaryCategory)}
                       </span>
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 overflow-hidden">
                       {opp.source_url ? (
                         <a href={opp.source_url} target="_blank" rel="noopener noreferrer"
-                           className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 max-w-full"
+                           className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 max-w-full overflow-hidden"
                            title={opp.source_url}>
                           <ExternalLink className="w-4 h-4 flex-shrink-0" />
                           <span className="truncate">{opp.source_url}</span>
@@ -170,20 +282,34 @@ export function OpportunitiesTable({ opportunities, loading }: OpportunitiesTabl
                       </span>
                     </td>
                     <td className="px-4 py-4">
-                      {opp.source_url ? (
-                        <a
-                          href={opp.source_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                          title="Open RFP in new tab"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                          View
-                        </a>
-                      ) : (
-                        <span className="text-sm text-gray-400">-</span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {opp.source_url && (
+                          <a
+                            href={opp.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap"
+                            title="Open RFP in new tab"
+                          >
+                            <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                            <span>View</span>
+                          </a>
+                        )}
+                        {showDeleteActions && (
+                          <button
+                            onClick={() => handleDeleteOne(opp.id)}
+                            disabled={isDeleting}
+                            className="inline-flex items-center justify-center p-1.5 text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors disabled:opacity-50"
+                            title="Delete opportunity"
+                          >
+                            {isDeleting ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
