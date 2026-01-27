@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { IPublicClientApplication } from '@azure/msal-browser';
-import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, PaginatedResponse } from '../types';
+import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, PaginatedResponse, SchedulerConfig, SchedulerConfigUpdate } from '../types';
 
 // Use environment variable for API base URL, fallback to relative path for dev proxy
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -225,6 +225,24 @@ export const sourcesApi = {
       params: { page: 1, page_size: 100 },
     });
     return response.data.items;
+  },
+};
+
+export const schedulerApi = {
+  /**
+   * Get scheduler configuration including next scheduled run time.
+   */
+  getConfig: async (): Promise<SchedulerConfig> => {
+    const response = await api.get<SchedulerConfig>('/scheduler/config');
+    return response.data;
+  },
+
+  /**
+   * Update scheduler configuration (days, time, enabled).
+   */
+  updateConfig: async (config: SchedulerConfigUpdate): Promise<SchedulerConfig> => {
+    const response = await api.put<SchedulerConfig>('/scheduler/config', config);
+    return response.data;
   },
 };
 

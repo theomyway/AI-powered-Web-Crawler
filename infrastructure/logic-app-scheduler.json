@@ -1,0 +1,134 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "rfp-scanner-scheduler",
+      "metadata": {
+        "description": "Name of the Logic App"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "backendApiUrl": {
+      "type": "string",
+      "metadata": {
+        "description": "Backend API URL (e.g., https://your-backend.azurewebsites.net/api/v1)"
+      }
+    },
+    "internalApiKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Internal API key (same as INTERNAL_API_KEY in backend .env)"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('logicAppName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "triggers": {
+            "Recurrence": {
+              "type": "Recurrence",
+              "recurrence": {
+                "frequency": "Week",
+                "interval": 1,
+                "schedule": {
+                  "weekDays": ["Monday", "Thursday"],
+                  "hours": ["6"],
+                  "minutes": [0]
+                },
+                "timeZone": "UTC"
+              }
+            }
+          },
+          "actions": {
+            "Trigger_Scheduled_Scan": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "[concat(parameters('backendApiUrl'), '/scheduler/trigger-scan')]",
+                "headers": {
+                  "Content-Type": "application/json",
+                  "X-Scheduler-Key": "@parameters('internalApiKey')"
+                },
+                "body": {}
+              },
+              "runAfter": {}
+            },
+            "Check_Response": {
+              "type": "If",
+              "expression": {
+                "and": [
+                  {
+                    "equals": ["@outputs('Trigger_Scheduled_Scan')['statusCode']", 200]
+                  }
+                ]
+              },
+              "actions": {
+                "Log_Success": {
+                  "type": "Compose",
+                  "inputs": {
+                    "status": "success",
+                    "message": "Scheduled scan triggered successfully",
+                    "response": "@body('Trigger_Scheduled_Scan')"
+                  }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Log_Failure": {
+                    "type": "Compose",
+                    "inputs": {
+                      "status": "failed",
+                      "statusCode": "@outputs('Trigger_Scheduled_Scan')['statusCode']",
+                      "error": "@body('Trigger_Scheduled_Scan')"
+                    }
+                  }
+                }
+              },
+              "runAfter": {
+                "Trigger_Scheduled_Scan": ["Succeeded", "Failed"]
+              }
+            }
+          },
+          "parameters": {
+            "internalApiKey": {
+              "type": "SecureString",
+              "defaultValue": "[parameters('internalApiKey')]"
+            }
+          }
+        },
+        "parameters": {
+          "internalApiKey": {
+            "value": "[parameters('internalApiKey')]"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "logicAppResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Logic/workflows', parameters('logicAppName'))]"
+    },
+    "logicAppName": {
+      "type": "string",
+      "value": "[parameters('logicAppName')]"
+    }
+  }
+}
+

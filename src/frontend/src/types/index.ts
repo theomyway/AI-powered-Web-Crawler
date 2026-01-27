@@ -108,3 +108,18 @@ export interface CrawlSource {
   progress_message: string | null;
 }
 
+export interface SchedulerConfig {
+  scheduled_days: string[];
+  scheduled_time_utc: string;
+  next_scheduled_run: string | null;
+  last_scheduled_run: string | null;
+  enabled: boolean;
+}
+
+export interface SchedulerConfigUpdate {
+  days: string[];
+  hour: number;
+  minute: number;
+  enabled: boolean;
+}
+

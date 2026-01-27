@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Info, RefreshCw, Search, ArrowRight, X } from 'lucide-react';
 import { StatsCards, OpportunitiesTable, CrawlerStatus } from '../components/dashboard';
-import { dashboardApi, opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
-import type { DashboardStats, Opportunity, CrawlSession, CrawlSource } from '../types';
+import { dashboardApi, opportunitiesApi, crawlApi, sourcesApi, schedulerApi } from '../services/api';
+import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, SchedulerConfig } from '../types';
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -11,6 +11,7 @@ export function Dashboard() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [latestSession, setLatestSession] = useState<CrawlSession | null>(null);
   const [processingSources, setProcessingSources] = useState<CrawlSource[]>([]);
+  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -21,15 +22,17 @@ export function Dashboard() {
       else setLoading(true);
       setError(null);
 
-      const [statsData, oppsData, sessionsData, sources] = await Promise.all([
+      const [statsData, oppsData, sessionsData, sources, schedulerData] = await Promise.all([
         dashboardApi.getStats(),
         opportunitiesApi.list(1, 20),  // Fetch more opportunities for scrollable table
         crawlApi.getSessions(1, 10),   // Fetch sessions
         sourcesApi.getAll(),           // Fetch sources for scan data
+        schedulerApi.getConfig().catch(() => null),  // Fetch scheduler config (optional)
       ]);
 
       setStats(statsData);
       setOpportunities(oppsData.items);
+      setSchedulerConfig(schedulerData);
 
       // Track sources that are currently processing (only if started recently - within last 10 minutes)
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
@@ -197,6 +200,8 @@ export function Dashboard() {
             session={latestSession}
             loading={loading}
             processingSources={processingSources}
+            schedulerConfig={schedulerConfig}
+            onSchedulerConfigChange={setSchedulerConfig}
           />
         </div>
       </div>

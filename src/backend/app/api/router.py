@@ -4,7 +4,7 @@ Main API router that aggregates all endpoint routers.
 
 from fastapi import APIRouter
 
-from app.api.endpoints import sources, opportunities, crawl, dashboard, auth, internal
+from app.api.endpoints import sources, opportunities, crawl, dashboard, auth, internal, scheduler
 
 api_router = APIRouter()
 
@@ -44,5 +44,11 @@ api_router.include_router(
     dashboard.router,
     prefix="/dashboard",
     tags=["Dashboard"],
+)
+
+# Include scheduler router (API key authentication for Logic App)
+api_router.include_router(
+    scheduler.router,
+    tags=["Scheduler"],
 )
 
