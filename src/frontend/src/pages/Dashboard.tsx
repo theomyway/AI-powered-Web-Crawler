@@ -201,7 +201,6 @@ export function Dashboard() {
             loading={loading}
             processingSources={processingSources}
             schedulerConfig={schedulerConfig}
-            onSchedulerConfigChange={setSchedulerConfig}
           />
         </div>
       </div>

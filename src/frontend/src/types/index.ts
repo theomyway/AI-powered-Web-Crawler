@@ -114,6 +114,7 @@ export interface SchedulerConfig {
   next_scheduled_run: string | null;
   last_scheduled_run: string | null;
   enabled: boolean;
+  target_urls: string[];
 }
 
 export interface SchedulerConfigUpdate {
@@ -121,5 +122,37 @@ export interface SchedulerConfigUpdate {
   hour: number;
   minute: number;
   enabled: boolean;
+  target_urls?: string[];
+}
+
+// Company Info types
+export interface CompanyInfo {
+  id: string;
+  tenant_id: string;
+  company_name: string;
+  email: string;
+  phone: string | null;
+  street_address: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
+  company_bio: string | null;
+  relevant_experience: string | null;
+  certifications: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyInfoUpdate {
+  company_name?: string;
+  email?: string;
+  phone?: string | null;
+  street_address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  company_bio?: string | null;
+  relevant_experience?: string | null;
+  certifications?: string[];
 }
 

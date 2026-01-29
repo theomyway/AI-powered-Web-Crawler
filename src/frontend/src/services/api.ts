@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { IPublicClientApplication } from '@azure/msal-browser';
-import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, PaginatedResponse, SchedulerConfig, SchedulerConfigUpdate } from '../types';
+import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, PaginatedResponse, SchedulerConfig, SchedulerConfigUpdate, CompanyInfo, CompanyInfoUpdate } from '../types';
 
 // Use environment variable for API base URL, fallback to relative path for dev proxy
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -242,6 +242,50 @@ export const schedulerApi = {
    */
   updateConfig: async (config: SchedulerConfigUpdate): Promise<SchedulerConfig> => {
     const response = await api.put<SchedulerConfig>('/scheduler/config', config);
+    return response.data;
+  },
+
+  /**
+   * Update only the target URLs for scheduled scans.
+   * This preserves the existing schedule settings.
+   */
+  updateTargetUrls: async (urls: string[]): Promise<SchedulerConfig> => {
+    // First get current config to preserve other settings
+    const current = await schedulerApi.getConfig();
+    // Parse hour from scheduled_time_utc (format: "HH:MM UTC")
+    const match = current.scheduled_time_utc?.match(/(\d+):(\d+)/);
+    const hour = match ? parseInt(match[1]) : 6;
+    const minute = match ? parseInt(match[2]) : 0;
+
+    const response = await api.put<SchedulerConfig>('/scheduler/config', {
+      days: current.scheduled_days,
+      hour,
+      minute,
+      enabled: current.enabled,
+      target_urls: urls,
+    });
+    return response.data;
+  },
+};
+
+// Company Info API
+export const companyApi = {
+  /**
+   * Get the company profile for the current tenant.
+   * Returns null if no company info exists yet.
+   */
+  get: async (): Promise<CompanyInfo | null> => {
+    const response = await api.get<CompanyInfo | null>('/company');
+    return response.data;
+  },
+
+  /**
+   * Create or update the company profile.
+   * If no company info exists, creates a new record.
+   * If company info exists, updates the existing record.
+   */
+  update: async (data: CompanyInfoUpdate): Promise<CompanyInfo> => {
+    const response = await api.put<CompanyInfo>('/company', data);
     return response.data;
   },
 };

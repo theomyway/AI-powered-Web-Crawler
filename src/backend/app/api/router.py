@@ -4,7 +4,7 @@ Main API router that aggregates all endpoint routers.
 
 from fastapi import APIRouter
 
-from app.api.endpoints import sources, opportunities, crawl, dashboard, auth, internal, scheduler
+from app.api.endpoints import sources, opportunities, crawl, dashboard, auth, internal, scheduler, company
 
 api_router = APIRouter()
 
@@ -50,5 +50,12 @@ api_router.include_router(
 api_router.include_router(
     scheduler.router,
     tags=["Scheduler"],
+)
+
+# Include company info router (authentication required)
+api_router.include_router(
+    company.router,
+    prefix="/company",
+    tags=["Company Info"],
 )
 

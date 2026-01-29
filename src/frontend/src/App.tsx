@@ -3,7 +3,7 @@ import { MsalProvider } from '@azure/msal-react';
 import { PublicClientApplication, EventType } from '@azure/msal-browser';
 import type { EventMessage, AuthenticationResult } from '@azure/msal-browser';
 import { Layout } from './components/layout';
-import { Dashboard, RfpScanner, Login, AuthCallback } from './pages';
+import { Dashboard, RfpScanner, CompanyInfo, Login, AuthCallback } from './pages';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
@@ -48,6 +48,7 @@ function App() {
                 >
                   <Route index element={<Dashboard />} />
                   <Route path="scanner" element={<RfpScanner />} />
+                  <Route path="company" element={<CompanyInfo />} />
                   <Route path="generator" element={<ComingSoon title="RFP Generator" />} />
                   <Route path="analytics" element={<ComingSoon title="Analytics" />} />
                 </Route>

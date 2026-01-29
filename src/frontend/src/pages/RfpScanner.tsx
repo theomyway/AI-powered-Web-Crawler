@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, Play, Plus, ExternalLink, ChevronDown, Wand2, Globe, Settings, X, Loader2, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 import { formatDistanceToNow, parseISO, isPast, differenceInMinutes } from 'date-fns';
-import { opportunitiesApi, crawlApi, sourcesApi } from '../services/api';
+import { opportunitiesApi, crawlApi, sourcesApi, schedulerApi } from '../services/api';
 import type { Opportunity, CrawlSource, ProcessingStatus } from '../types';
 import type { UrlCrawlResponse } from '../services/api';
 
@@ -76,15 +76,8 @@ const SCANNER_URLS_KEY = 'rfp_scanner_urls';
 export function RfpScanner() {
   // Scanner configuration state
   const [targetUrl, setTargetUrl] = useState('');
-  const [urlList, setUrlList] = useState<string[]>(() => {
-    // Load URLs from localStorage on initial render
-    try {
-      const saved = localStorage.getItem(SCANNER_URLS_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [urlList, setUrlList] = useState<string[]>([]);
+  const [urlsLoaded, setUrlsLoaded] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
     CATEGORIES.map(c => c.value) // All categories selected by default
   );
@@ -405,14 +398,66 @@ export function RfpScanner() {
   const allSelected = opportunities.length > 0 && selectedIds.size === opportunities.length;
   const someSelected = selectedIds.size > 0 && selectedIds.size < opportunities.length;
 
-  // Save URLs to localStorage whenever urlList changes
+  // Load URLs from scheduler config on mount
   useEffect(() => {
+    const loadUrlsFromScheduler = async () => {
+      try {
+        const config = await schedulerApi.getConfig();
+        if (config.target_urls && config.target_urls.length > 0) {
+          setUrlList(config.target_urls);
+        } else {
+          // Fallback to localStorage for migration
+          const saved = localStorage.getItem(SCANNER_URLS_KEY);
+          if (saved) {
+            const urls = JSON.parse(saved);
+            setUrlList(urls);
+            // Migrate to scheduler config
+            if (urls.length > 0) {
+              await schedulerApi.updateTargetUrls(urls);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load URLs from scheduler config:', error);
+        // Fallback to localStorage
+        try {
+          const saved = localStorage.getItem(SCANNER_URLS_KEY);
+          if (saved) setUrlList(JSON.parse(saved));
+        } catch {
+          // ignore
+        }
+      } finally {
+        setUrlsLoaded(true);
+      }
+    };
+    loadUrlsFromScheduler();
+  }, []);
+
+  // Sync URLs to scheduler config and localStorage whenever urlList changes
+  useEffect(() => {
+    if (!urlsLoaded) return; // Don't sync until initial load is complete
+
+    // Save to localStorage as backup
     try {
       localStorage.setItem(SCANNER_URLS_KEY, JSON.stringify(urlList));
     } catch (error) {
       console.error('Failed to save URLs to localStorage:', error);
     }
-  }, [urlList]);
+
+    // Sync to scheduler config (debounced to avoid too many API calls)
+    const syncToScheduler = async () => {
+      try {
+        await schedulerApi.updateTargetUrls(urlList);
+        console.log('URLs synced to scheduler config:', urlList);
+      } catch (error) {
+        console.error('Failed to sync URLs to scheduler config:', error);
+      }
+    };
+
+    // Debounce the sync
+    const timeoutId = setTimeout(syncToScheduler, 500);
+    return () => clearTimeout(timeoutId);
+  }, [urlList, urlsLoaded]);
 
   // Load sources on mount
   useEffect(() => {

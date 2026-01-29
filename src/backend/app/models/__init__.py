@@ -11,6 +11,7 @@ from app.models.crawl_session import CrawlSession, CrawlSessionStatus
 from app.models.document import Document, DocumentType, ProcessingStatus
 from app.models.prequalification import PrequalificationRequirement
 from app.models.app_settings import AppSettings
+from app.models.company_info import CompanyInfo
 
 __all__ = [
     # Crawl Source
@@ -32,5 +33,7 @@ __all__ = [
     "PrequalificationRequirement",
     # App Settings
     "AppSettings",
+    # Company Info
+    "CompanyInfo",
 ]
 

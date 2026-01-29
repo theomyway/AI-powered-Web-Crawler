@@ -24,6 +24,7 @@ from app.models import (
     CrawlSession,
     Document,
     PrequalificationRequirement,
+    CompanyInfo,
 )
 
 # Alembic Config object
