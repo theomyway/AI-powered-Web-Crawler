@@ -156,3 +156,29 @@ export interface CompanyInfoUpdate {
   certifications?: string[];
 }
 
+// RFP Generator types
+export interface CompanyInfoInput {
+  company_name: string;
+  company_bio: string | null;
+  relevant_experience: string | null;
+  certifications: string[];
+}
+
+export interface GenerateRfpRequest {
+  opportunity_id: string;
+  company_info: CompanyInfoInput;
+}
+
+export interface GenerateRfpResponse {
+  success: boolean;
+  document_content: string;
+  generated_at: string;
+  opportunity_title: string;
+}
+
+export interface DownloadRfpRequest {
+  document_content: string;
+  opportunity_id: string;
+  format: 'docx' | 'pdf';
+  opportunity_title?: string;
+}

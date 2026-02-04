@@ -2,7 +2,7 @@
  * Authentication Context for Microsoft Entra ID
  * Provides authentication state and methods throughout the application
  */
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { useMsal, useIsAuthenticated } from '@azure/msal-react';
 import type { AccountInfo } from '@azure/msal-browser';
 import { InteractionStatus } from '@azure/msal-browser';
@@ -24,6 +24,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = useIsAuthenticated();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [tokenValidated, setTokenValidated] = useState(false);
+  const validationAttempted = useRef(false);
 
   // Get the active account
   const user = accounts.length > 0 ? accounts[0] : null;
@@ -35,14 +37,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [accounts, instance]);
 
-  // Update loading state based on MSAL interaction status
+  // Validate token on mount - this handles stale tokens after PC sleep/restart
   useEffect(() => {
-    if (inProgress === InteractionStatus.None) {
+    const validateToken = async () => {
+      // Only attempt validation once and when not in the middle of an interaction
+      if (validationAttempted.current || inProgress !== InteractionStatus.None) {
+        return;
+      }
+
+      const activeAccount = instance.getActiveAccount();
+      if (!activeAccount) {
+        setTokenValidated(true);
+        return;
+      }
+
+      validationAttempted.current = true;
+
+      try {
+        // Try to silently acquire a token to validate the session
+        await instance.acquireTokenSilent({
+          ...loginRequest,
+          account: activeAccount,
+        });
+        setTokenValidated(true);
+      } catch (error) {
+        console.warn('Silent token acquisition failed, session may be stale:', error);
+        // Token is stale - clear the account and let user re-authenticate
+        // This prevents the redirect loop
+        instance.setActiveAccount(null);
+        setTokenValidated(true);
+      }
+    };
+
+    validateToken();
+  }, [instance, inProgress]);
+
+  // Update loading state based on MSAL interaction status and token validation
+  useEffect(() => {
+    if (inProgress === InteractionStatus.None && tokenValidated) {
       setIsLoading(false);
-    } else {
+    } else if (inProgress !== InteractionStatus.None) {
       setIsLoading(true);
     }
-  }, [inProgress]);
+  }, [inProgress, tokenValidated]);
 
   const login = async () => {
     setError(null);

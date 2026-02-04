@@ -477,61 +477,80 @@ class PageCrawlerService:
         proxy_url = self._get_proxy_url()
 
         logger.info(f"Downloading document: {url}")
+        if proxy_url:
+            logger.info(f"Using proxy for download")
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                timeout = httpx.Timeout(self.timeout_seconds, connect=30.0)
-                client_kwargs = {
-                    "timeout": timeout,
-                    "follow_redirects": True,
-                    "headers": headers,
-                }
+        # Try with SSL verification first, then without if SSL errors occur
+        ssl_options = [True, False]
+        last_error = None
 
-                if proxy_url:
-                    client_kwargs["proxy"] = proxy_url
+        for verify_ssl in ssl_options:
+            for attempt in range(self.max_retries + 1):
+                try:
+                    timeout = httpx.Timeout(self.timeout_seconds, connect=30.0)
+                    client_kwargs = {
+                        "timeout": timeout,
+                        "follow_redirects": True,
+                        "headers": headers,
+                        "verify": verify_ssl,
+                    }
 
-                async with httpx.AsyncClient(**client_kwargs) as client:
-                    response = await client.get(url)
-                    response.raise_for_status()
+                    if proxy_url:
+                        client_kwargs["proxy"] = proxy_url
 
-                    content = response.content
-                    logger.info(f"Downloaded {len(content)} bytes from {url}")
+                    logger.info(f"Download attempt {attempt + 1}/{self.max_retries + 1} (SSL verify={verify_ssl})")
 
-                    if save_path:
-                        with open(save_path, "wb") as f:
-                            f.write(content)
+                    async with httpx.AsyncClient(**client_kwargs) as client:
+                        response = await client.get(url)
+                        response.raise_for_status()
 
-                    return content, None
+                        content = response.content
+                        logger.info(f"Downloaded {len(content)} bytes from {url}")
 
-            except httpx.TimeoutException:
-                error = "Download timeout: The document took too long to download."
-                logger.warning(f"{error} URL: {url} (attempt {attempt + 1}/{self.max_retries + 1})")
-                if attempt < self.max_retries:
-                    await asyncio.sleep(self.settings.crawler_retry_min_wait * (2 ** attempt))
-                    continue
-                return None, f"{error} Try using a VPN or proxy for geo-restricted content."
+                        if save_path:
+                            with open(save_path, "wb") as f:
+                                f.write(content)
 
-            except httpx.HTTPStatusError as e:
-                status = e.response.status_code
-                if status in [403, 451]:
-                    error = f"HTTP {status}: Access denied. This may be geo-blocking."
-                elif status == 429:
-                    error = f"HTTP {status}: Rate limited. Wait before retrying."
+                        return content, None
+
+                except httpx.TimeoutException:
+                    last_error = "Download timeout: The document took too long to download."
+                    logger.warning(f"{last_error} URL: {url} (attempt {attempt + 1}/{self.max_retries + 1})")
                     if attempt < self.max_retries:
                         await asyncio.sleep(self.settings.crawler_retry_min_wait * (2 ** attempt))
                         continue
-                else:
-                    error = f"HTTP {status}: Failed to download document."
-                logger.error(f"{error} URL: {url}")
-                return None, error
+                    break  # Try with different SSL setting
 
-            except Exception as e:
-                error = f"Download error: {str(e)}"
-                logger.error(f"{error} URL: {url}")
-                if attempt < self.max_retries:
-                    await asyncio.sleep(self.settings.crawler_retry_min_wait * (2 ** attempt))
-                    continue
-                return None, error
+                except httpx.HTTPStatusError as e:
+                    status = e.response.status_code
+                    if status in [403, 451]:
+                        last_error = f"HTTP {status}: Access denied. This may be geo-blocking."
+                    elif status == 429:
+                        last_error = f"HTTP {status}: Rate limited. Wait before retrying."
+                        if attempt < self.max_retries:
+                            await asyncio.sleep(self.settings.crawler_retry_min_wait * (2 ** attempt))
+                            continue
+                    else:
+                        last_error = f"HTTP {status}: Failed to download document."
+                    logger.error(f"{last_error} URL: {url}")
+                    return None, last_error
 
-        return None, "Max retries exceeded"
+                except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                    last_error = f"Connection error: {str(e)}"
+                    logger.warning(f"{last_error} URL: {url} (attempt {attempt + 1}, SSL verify={verify_ssl})")
+                    # For connection/SSL errors, try next SSL option
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(self.settings.crawler_retry_min_wait * (2 ** attempt))
+                        continue
+                    break  # Try with verify=False
+
+                except Exception as e:
+                    last_error = f"Download error: {str(e)}"
+                    logger.error(f"{last_error} URL: {url}")
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(self.settings.crawler_retry_min_wait * (2 ** attempt))
+                        continue
+                    break  # Try with different SSL setting
+
+        return None, last_error or "Max retries exceeded"
 

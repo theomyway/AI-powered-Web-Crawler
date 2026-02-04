@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Scan, Building2, Sun, Moon, LogOut } from 'lucide-react';
+import { LayoutDashboard, Scan, Building2, FileText, Sun, Moon, LogOut } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'RFP Scanner', href: '/scanner', icon: Scan },
+  { name: 'RFP Generator', href: '/generator', icon: FileText },
   { name: 'Company Info', href: '/company', icon: Building2 },
 ];
 

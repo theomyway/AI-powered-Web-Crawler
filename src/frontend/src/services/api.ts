@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { IPublicClientApplication } from '@azure/msal-browser';
-import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, PaginatedResponse, SchedulerConfig, SchedulerConfigUpdate, CompanyInfo, CompanyInfoUpdate } from '../types';
+import type { DashboardStats, Opportunity, CrawlSession, CrawlSource, PaginatedResponse, SchedulerConfig, SchedulerConfigUpdate, CompanyInfo, CompanyInfoUpdate, GenerateRfpRequest, GenerateRfpResponse, DownloadRfpRequest } from '../types';
 
 // Use environment variable for API base URL, fallback to relative path for dev proxy
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -290,5 +290,25 @@ export const companyApi = {
   },
 };
 
-export default api;
+// RFP Generator API
+export const rfpGeneratorApi = {
+  /**
+   * Generate an RFP response document for the selected opportunity.
+   */
+  generate: async (request: GenerateRfpRequest): Promise<GenerateRfpResponse> => {
+    const response = await api.post<GenerateRfpResponse>('/rfp-generator/generate', request);
+    return response.data;
+  },
 
+  /**
+   * Download the generated RFP document as DOCX.
+   */
+  download: async (request: DownloadRfpRequest): Promise<Blob> => {
+    const response = await api.post('/rfp-generator/download', request, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+};
+
+export default api;

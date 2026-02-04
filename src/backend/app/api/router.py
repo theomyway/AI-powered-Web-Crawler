@@ -4,7 +4,7 @@ Main API router that aggregates all endpoint routers.
 
 from fastapi import APIRouter
 
-from app.api.endpoints import sources, opportunities, crawl, dashboard, auth, internal, scheduler, company
+from app.api.endpoints import sources, opportunities, crawl, dashboard, auth, internal, scheduler, company, rfp_generator
 
 api_router = APIRouter()
 
@@ -57,5 +57,12 @@ api_router.include_router(
     company.router,
     prefix="/company",
     tags=["Company Info"],
+)
+
+# Include RFP generator router (authentication required)
+api_router.include_router(
+    rfp_generator.router,
+    prefix="/rfp-generator",
+    tags=["RFP Generator"],
 )
 

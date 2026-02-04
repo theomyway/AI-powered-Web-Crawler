@@ -2,9 +2,10 @@
 Azure Functions V2 Programming Model Entry Point.
 
 This file registers HTTP and Service Bus triggers for the Function App.
-Supports both:
-1. HTTP trigger (legacy) - for direct API calls
+Supports:
+1. HTTP trigger (crawl) - for web crawling and classification
 2. Service Bus trigger - for queue-based sequential URL processing
+3. HTTP trigger (generate-rfp-response) - for AI-powered RFP response generation
 """
 
 import json
@@ -13,6 +14,7 @@ import azure.functions as func
 
 # Import the main handlers from rfp_crawler
 from rfp_crawler import main as rfp_crawler_main, process_servicebus_message
+from rfp_generator import main as rfp_generator_main
 
 # Create the Function App
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -62,4 +64,18 @@ async def process_url_queue(msg: func.ServiceBusMessage) -> None:
         logging.error(f"Error processing Service Bus message: {e}", exc_info=True)
         # Re-raise to trigger dead-letter queue
         raise
+
+
+@app.route(route="generate-rfp-response", methods=["POST"])
+async def generate_rfp_response(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP trigger for AI-powered RFP response generation.
+
+    Receives opportunity data and company info, downloads the RFP document,
+    extracts text using Azure Document Intelligence, and generates a
+    professional RFP response using Azure OpenAI GPT-4o.
+
+    Delegates to the rfp_generator module's main function.
+    """
+    return await rfp_generator_main(req)
 
